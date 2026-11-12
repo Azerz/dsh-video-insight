@@ -6,11 +6,11 @@
   "author": "Jerry (Azerz)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Azerz/dsh-video.git"
+    "url": "git+https://github.com/Azerz/dsh-video-insight.git"
   },
-  "homepage": "https://github.com/Azerz/dsh-video#readme",
+  "homepage": "https://github.com/Azerz/dsh-video-insight#readme",
   "bugs": {
-    "url": "https://github.com/Azerz/dsh-video/issues"
+    "url": "https://github.com/Azerz/dsh-video-insight/issues"
   },
   "keywords": [
     "deepseek-harness",

@@ -100,24 +100,24 @@ curl -L -o ggml-large-v3-turbo-q5_0.bin \
 ## 安装
 
 ```bash
-git clone https://github.com/Azerz/dsh-video.git
+git clone https://github.com/Azerz/dsh-video-insight.git
 ```
 
 装进 DSH profile 有两条路：
 
-**① 让 harness 里的 agent 装（最省事）** —— 在任意会话里说「把 `/path/to/dsh-video` 装成插件」，或直接调用插件管理工具 `plugin_manager`：
+**① 让 harness 里的 agent 装（最省事）** —— 在任意会话里说「把 `/path/to/dsh-video-insight` 装成插件」，或直接调用插件管理工具 `plugin_manager`：
 
 ```jsonc
-{ "action": "install_bundle", "target": "/path/to/dsh-video" }
+{ "action": "install_bundle", "target": "/path/to/dsh-video-insight" }
 ```
 
-安装器会自动把 `"dsh-video-insight": "link:/path/to/dsh-video"` 写进 profile 的 `dependencies`，并把 `"dsh-video-insight"` 追加进 `dsh.profile.bundles`，live profile 立即生效，刷新页面就能看到左侧栏入口。
+安装器会自动把 `"dsh-video-insight": "link:/path/to/dsh-video-insight"` 写进 profile 的 `dependencies`，并把 `"dsh-video-insight"` 追加进 `dsh.profile.bundles`，live profile 立即生效，刷新页面就能看到左侧栏入口。
 
 **② 手工装** —— 编辑 `~/.dsh/profiles/desktop/package.json`：
 
 ```jsonc
 {
-  "dependencies": { "dsh-video-insight": "link:/path/to/dsh-video" },
+  "dependencies": { "dsh-video-insight": "link:/path/to/dsh-video-insight" },
   "dsh": { "profile": { "bundles": [ /* …, */ "dsh-video-insight" ] } }
 }
 ```
@@ -209,7 +209,7 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 
 ## 开源
 
-- 仓库：[github.com/Azerz/dsh-video](https://github.com/Azerz/dsh-video)
+- 仓库：[github.com/Azerz/dsh-video-insight](https://github.com/Azerz/dsh-video-insight)
 - 协议：[MIT](LICENSE)，欢迎 issue / PR。
 - 这是个人自用的插件，接口（`/dsh-video/api/*`）与目录结构可能随版本调整；升级前建议先看 `CONTRACT.md`。
 - 与 BibiGPT 的关系：功能灵感来自 BibiGPT 的「链接进去、笔记和问答出来」，实现是独立的，跑在 DeepSeek Harness 上、用你 profile 里已有的模型。
