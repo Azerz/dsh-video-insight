@@ -1,0 +1,20 @@
+# dsh-video：一条行插入。host 半零外部依赖，只需要三个服务：
+#  - webServer：给面板开同源 JSON API（/dsh-video/api/*）与 SSE 流（/analyze、/transcribe）；
+#  - llm：面板里的「总结 / 章节 / 追问」用用户当前默认模型生成；
+#  - agentDefaultModel：读默认模型选择（没有就退回 llm 的第一条 provider）；
+# 再注入 tools 注册一个 video 工具。全部走 ctx.inject，服务缺席时插件仍可激活。
+#
+# B 站 Cookie（SESSDATA）可以写在这里，也可以（推荐）在面板「设置」里填 ——
+# 后者写到 ~/.dsh/video-credentials.json，优先级更高，改完立即生效。
+# 本地语音转写（Whisper / SenseVoice）的开关、引擎与路径同样在面板里改，存到同一个文件。
+- insert:
+    - id: video
+      name: 'dsh-video'
+      config:
+        bilibiliCookie: ''
+        transcriptLimitChars: 60000
+        requestTimeoutMs: 20000
+        asr:
+          enabled: true
+          engine: auto          # auto | whisper | sensevoice
+          autoTranscribe: true  # 解析到无字幕视频时自动本地转写

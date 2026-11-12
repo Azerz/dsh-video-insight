@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "title": "Video",
+    "description": "Analyze YouTube and Bilibili videos inside DSH: transcripts, summaries, chapters, and follow-up questions."
+  },
+  "panel": {
+    "title": "Video",
+    "subtitle": "Paste a YouTube or Bilibili link to get the transcript, summary, and chapters",
+    "placeholder": "Paste a video link, e.g. https://www.youtube.com/watch?v=... or https://www.bilibili.com/video/BV...",
+    "resolve": "Analyze",
+    "summary": "Summary",
+    "chapters": "Chapters",
+    "transcript": "Transcript",
+    "ask": "Ask",
+    "settings": "Settings",
+    "history": "History"
+  }
+}

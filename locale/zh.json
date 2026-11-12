@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "title": "视频解析",
+    "description": "在 DSH 里快速分析 YouTube / 哔哩哔哩视频：自动抓字幕，生成总结、章节、要点，还能就视频内容追问。"
+  },
+  "panel": {
+    "title": "视频解析",
+    "subtitle": "粘贴 YouTube / 哔哩哔哩链接，立刻拿到字幕、总结与章节",
+    "placeholder": "粘贴视频链接，例如 https://www.youtube.com/watch?v=... 或 https://www.bilibili.com/video/BV...",
+    "resolve": "解析",
+    "summary": "总结",
+    "chapters": "章节",
+    "transcript": "原文",
+    "ask": "追问",
+    "settings": "设置",
+    "history": "历史"
+  }
+}

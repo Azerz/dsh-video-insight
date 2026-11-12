@@ -1,0 +1,57 @@
+{
+  "name": "dsh-video",
+  "version": "0.4.8",
+  "description": "在 DeepSeek Harness 里快速分析视频：左侧栏「视频解析」面板，粘贴 YouTube / 哔哩哔哩链接，自动抓字幕并生成总结、章节、要点、原文与追问；无字幕时可用本机 Whisper / SenseVoice 转写兜底（音频不出本机），纯无声视频还能用画面文字识别（OCR）或视觉模型描述画面；右栏有 AI 思维导图；追问是基于转写稿的 RAG 问答（回答带「依据」时间戳）；分析结果按视频缓存，历史记录可回看。",
+  "license": "MIT",
+  "author": "Jerry (Azerz)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Azerz/dsh-video.git"
+  },
+  "homepage": "https://github.com/Azerz/dsh-video#readme",
+  "bugs": {
+    "url": "https://github.com/Azerz/dsh-video/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "dsh",
+    "video",
+    "youtube",
+    "bilibili",
+    "bilibili-subtitle",
+    "transcript",
+    "whisper",
+    "asr",
+    "ocr",
+    "mindmap",
+    "rag",
+    "summary",
+    "bibiGPT"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/*.js",
+    "client/*.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  }
+}
