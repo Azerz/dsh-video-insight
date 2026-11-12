@@ -99,21 +99,31 @@ curl -L -o ggml-large-v3-turbo-q5_0.bin \
 
 ## 安装
 
+已经发布到 npm：[`dsh-video-insight`](https://www.npmjs.com/package/dsh-video-insight)。
+
+**① 让 harness 里的 agent 装（最省事）** —— 在任意会话里说「装一下 npm 包 dsh-video-insight 这个插件」，或直接调用插件管理工具 `plugin_manager`：
+
+```jsonc
+{ "action": "install_bundle", "target": "dsh-video-insight" }
+```
+
+安装器会自动把它写进 profile 的 `dependencies` 和 `dsh.profile.bundles`，live profile 立即生效，刷新页面就能看到左侧栏入口。
+
+**② 装本地克隆/目录** —— 想改代码或尝鲜时：
+
 ```bash
 git clone https://github.com/Azerz/dsh-video-insight.git
 ```
 
-装进 DSH profile 有两条路：
-
-**① 让 harness 里的 agent 装（最省事）** —— 在任意会话里说「把 `/path/to/dsh-video-insight` 装成插件」，或直接调用插件管理工具 `plugin_manager`：
+然后让 agent 装，或直接调用插件管理工具 `plugin_manager`：
 
 ```jsonc
 { "action": "install_bundle", "target": "/path/to/dsh-video-insight" }
 ```
 
-安装器会自动把 `"dsh-video-insight": "link:/path/to/dsh-video-insight"` 写进 profile 的 `dependencies`，并把 `"dsh-video-insight"` 追加进 `dsh.profile.bundles`，live profile 立即生效，刷新页面就能看到左侧栏入口。
+安装器会自动把 `"dsh-video-insight": "link:/path/to/dsh-video-insight"` 写进 profile 的 `dependencies`，并把 `"dsh-video-insight"` 追加进 `dsh.profile.bundles`。
 
-**② 手工装** —— 编辑 `~/.dsh/profiles/desktop/package.json`：
+**③ 手工装** —— 编辑 `~/.dsh/profiles/desktop/package.json`：
 
 ```jsonc
 {
