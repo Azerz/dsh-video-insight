@@ -101,16 +101,36 @@ curl -L -o ggml-large-v3-turbo-q5_0.bin \
 
 ```bash
 git clone https://github.com/Azerz/dsh-video.git
-# 从本地目录装进 profile（写进 profile 的 dependencies 与 dsh.profile.bundles）
-dsh plugin --profile desktop add "$(pwd)/dsh-video"
-
-# 确认路由已挂上（同源）
-curl -s http://127.0.0.1:50231/dsh-video/api/status
 ```
 
-host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文件、不跑构建。装完刷新页面即可看到入口；若 bundle 没被加载，重启 App 后生效（重启会中断当前 GUI 会话）。
+装进 DSH profile 有两条路：
 
-也可以手工装：在 `~/.dsh/profiles/desktop/package.json` 的 `dependencies` 里加 `"dsh-video": "link:/path/to/dsh-video"`，并在 `dsh.profile.bundles` 数组里加 `"dsh-video"`。
+**① 让 harness 里的 agent 装（最省事）** —— 在任意会话里说「把 `/path/to/dsh-video` 装成插件」，或直接调用插件管理工具 `plugin_manager`：
+
+```jsonc
+{ "action": "install_bundle", "target": "/path/to/dsh-video" }
+```
+
+安装器会自动把 `"dsh-video": "link:/path/to/dsh-video"` 写进 profile 的 `dependencies`，并把 `"dsh-video"` 追加进 `dsh.profile.bundles`，live profile 立即生效，刷新页面就能看到左侧栏入口。
+
+**② 手工装** —— 编辑 `~/.dsh/profiles/desktop/package.json`：
+
+```jsonc
+{
+  "dependencies": { "dsh-video": "link:/path/to/dsh-video" },
+  "dsh": { "profile": { "bundles": [ /* …, */ "dsh-video" ] } }
+}
+```
+
+然后在该 profile 目录里 `pnpm install`，重启 App。
+
+装好后确认路由在线：
+
+```bash
+curl -s http://127.0.0.1:50231/dsh-video/api/status   # 端口以实际 GUI 为准
+```
+
+host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文件、不跑构建。可选依赖（仅本地转写/画面识别需要）：`brew install ffmpeg yt-dlp whisper.cpp`，详见上文。
 
 ## 同源 API（面板用，也可自己 curl）
 
