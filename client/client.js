@@ -1,5 +1,5 @@
 /**
- * dsh-video 浏览器半 · 「视频解析」面板
+ * dsh-video-insight 浏览器半 · 「视频解析」面板
  *
  * 两个插槽：
  *  - sidebar.panellist：播放 + 星芒图标（order 30），点击由侧边栏 layout.selectPanel('video')；
@@ -8,7 +8,7 @@
  * 浏览器半不直连平台、不持有凭证。
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-video',
+  id: 'dsh-video-insight',
   factory: (require) => {
     const React = require('react');
     const { useCallback, useEffect, useRef, useState } = React;

@@ -1,11 +1,11 @@
-# dsh-video · 视频解析
+# dsh-video-insight · 视频解析
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#已知限制)
-[![Version](https://img.shields.io/badge/dsh--video-v0.4.8-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.4.8-blue.svg)](package.json)
 
-![dsh-video](icon.svg)
+![dsh-video-insight](icon.svg)
 
 DeepSeek Harness 的视频插件库里的「第二块屏」：左侧栏「知乎浏览」下面是**视频解析**入口，点开是一整页面板：**左栏**上方是内嵌播放器、下方是追问对话框，**右栏**是总结 / 章节 / 原文 / 思维导图。粘贴一条 YouTube 或哔哩哔哩链接，插件自己把字幕抓下来，用你当前的默认模型生成内容；点时间戳直接跳到对应位置，边看边读。左上角「← 返回」：在视频详情页点它回到插件首页（大输入框 + 最近分析），已经在首页时再点才回到会话界面。
 
@@ -111,14 +111,14 @@ git clone https://github.com/Azerz/dsh-video.git
 { "action": "install_bundle", "target": "/path/to/dsh-video" }
 ```
 
-安装器会自动把 `"dsh-video": "link:/path/to/dsh-video"` 写进 profile 的 `dependencies`，并把 `"dsh-video"` 追加进 `dsh.profile.bundles`，live profile 立即生效，刷新页面就能看到左侧栏入口。
+安装器会自动把 `"dsh-video-insight": "link:/path/to/dsh-video"` 写进 profile 的 `dependencies`，并把 `"dsh-video-insight"` 追加进 `dsh.profile.bundles`，live profile 立即生效，刷新页面就能看到左侧栏入口。
 
 **② 手工装** —— 编辑 `~/.dsh/profiles/desktop/package.json`：
 
 ```jsonc
 {
-  "dependencies": { "dsh-video": "link:/path/to/dsh-video" },
-  "dsh": { "profile": { "bundles": [ /* …, */ "dsh-video" ] } }
+  "dependencies": { "dsh-video-insight": "link:/path/to/dsh-video" },
+  "dsh": { "profile": { "bundles": [ /* …, */ "dsh-video-insight" ] } }
 }
 ```
 
@@ -176,7 +176,7 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 ```yaml
 - insert:
     - id: video
-      name: 'dsh-video'
+      name: 'dsh-video-insight'
       config:
         bilibiliCookie: ''      # 也可以（推荐）在面板「设置」里填
         transcriptLimitChars: 60000

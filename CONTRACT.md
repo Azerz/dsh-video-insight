@@ -1,4 +1,4 @@
-# dsh-video 内部契约（host ⇄ 浏览器半）
+# dsh-video-insight 内部契约（host ⇄ 浏览器半）
 
 host 半在 profile 的 webServer 上挂一个同源前缀路由 `/dsh-video/api`，
 浏览器半只用 `fetch` 打这个前缀，不直接联网、不持有凭证。
