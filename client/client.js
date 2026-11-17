@@ -42,6 +42,11 @@ window.__ModuleLoader__.load({
     const EMPTY_STORYBOARD = { data: null, loading: false, phase: '', percent: null, error: '', code: '' };
     const STORYBOARD_STAGE_LABEL = { download: '正在下载视频…', scan: '正在扫描镜头…', frames: '正在抽取画面…' };
 
+    /** 原文双语对照：host 按视频缓存翻译结果（GET 读缓存 / POST SSE 生成）。 */
+    const EMPTY_TRANSLATION = { lang: '', loading: false, phase: '', percent: null, error: '', code: '', data: null, cached: false, createdAt: 0 };
+    const TRANSLATE_LANGS = [['zh', '中文（zh）'], ['en', 'English（en）']];
+    const TRANSLATE_STAGE_LABEL = { translate: '正在翻译字幕…' };
+
     /* ------------------------------------------------------------------ 常量 */
 
     const PLATFORM_META = {
@@ -526,6 +531,47 @@ window.__ModuleLoader__.load({
       } catch { return false; }
     }
 
+    /** 去掉文件名里不允许的字符（各平台/Windows 一致），避免下载失败。 */
+    function sanitizeFileName(value) {
+      const text = String(value ?? '')
+        .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return text || 'video-note';
+    }
+
+    /** 生成可导出/保存的 Markdown 笔记：标题、来源信息、总结正文、章节列表。 */
+    function buildNoteMarkdown(doc, parts) {
+      const source = doc || {};
+      const rawSummary = parts && parts.summary !== undefined ? parts.summary : '';
+      const summaryText = String(
+        typeof rawSummary === 'string' ? rawSummary : (rawSummary && rawSummary.text) || '',
+      ).trim();
+      const rawChapters = parts ? parts.chapters : [];
+      const chapters = Array.isArray(rawChapters)
+        ? rawChapters
+        : (rawChapters && Array.isArray(rawChapters.items) ? rawChapters.items : []);
+      const title = String(source.title || source.docId || '视频笔记').trim();
+      const platform = source.platform || guessPlatform(source.url);
+      const meta = [];
+      if (platform) meta.push(platformMeta(platform).label);
+      if (source.author) meta.push(String(source.author));
+      const duration = Number(source.duration);
+      if (Number.isFinite(duration) && duration > 0) meta.push(fmtTime(duration));
+      if (source.url) meta.push(String(source.url));
+      const lines = [`# ${title}`, ''];
+      if (meta.length) lines.push(`> ${meta.join(' · ')}`, '');
+      if (summaryText) lines.push(summaryText, '');
+      const chapterRows = chapters.map((item) => {
+        const start = Number(item && item.start);
+        if (!item || !Number.isFinite(start)) return null;
+        const chapterTitle = String(item.title || '').trim();
+        return `- [${fmtTime(start)}]${chapterTitle ? ` ${chapterTitle}` : ''}`;
+      }).filter(Boolean);
+      if (chapterRows.length) lines.push('## 章节', ...chapterRows, '');
+      return `${lines.join('\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim()}\n`;
+    }
+
     /* ------------------------------------------------------- markdown-lite 渲染 */
 
     const INLINE_PATTERN = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[\d{1,2}:\d{2}(?::\d{2})?\])/g;
@@ -846,7 +892,7 @@ window.__ModuleLoader__.load({
 
     /* ------------------------------------------------------------------ 总结 */
 
-    function SummaryTab({ doc, summary, onRun, onStop, onCopy, onGoSettings, onSeek }) {
+    function SummaryTab({ doc, summary, onRun, onStop, onCopy, onCopyMarkdown, onDownloadMarkdown, onGoSettings, onSeek }) {
       const available = hasTranscript(doc);
       const official = doc && doc.officialSummary && doc.officialSummary.summary ? String(doc.officialSummary.summary) : '';
       const parts = [];
@@ -886,7 +932,20 @@ window.__ModuleLoader__.load({
         if (summary.text || summary.error) actions.push(h('button', { key: 'again', type: 'button', className: 'dvv-btn', onClick: onRun }, '重新生成'));
         if (summary.text) actions.push(h('button', { key: 'copy', type: 'button', className: 'dvv-btn', onClick: onCopy }, '复制'));
       }
-      if (actions.length) parts.push(h('div', { key: 'actions', className: 'dvv-actions' }, actions));
+      const canExport = Boolean(summary.text);
+      const exportHint = canExport ? '' : '先生成总结';
+      actions.push(h('span', { key: 'spacer', className: 'dvv-actions-spacer' }));
+      actions.push(h('button', {
+        key: 'md-copy', type: 'button', className: 'dvv-btn', 'data-export': 'copy',
+        disabled: !canExport, title: canExport ? '复制完整笔记为 Markdown（含标题、来源与章节）' : exportHint,
+        onClick: onCopyMarkdown,
+      }, '复制 Markdown'));
+      actions.push(h('button', {
+        key: 'md-download', type: 'button', className: 'dvv-btn', 'data-export': 'download',
+        disabled: !canExport, title: canExport ? '下载为 .md 文件' : exportHint,
+        onClick: onDownloadMarkdown,
+      }, '下载 .md'));
+      parts.push(h('div', { key: 'actions', className: 'dvv-actions' }, actions));
       if (!summary.loading && !summary.text && !summary.error) {
         parts.push(h('div', { key: 'idle', className: 'dvv-notice' }, [
           h('div', { key: 'n', className: 'dvv-note' }, '还没有生成总结。'),
@@ -945,7 +1004,38 @@ window.__ModuleLoader__.load({
 
     /* ------------------------------------------------------------------ 原文 */
 
-    function TranscriptTab({ doc, query, showAll, onQuery, onShowAll, onCopySegment, onCopyAll, onGoSettings, onSeek }) {
+    function TranscriptTab(props) {
+      const { doc, query, showAll, onQuery, onShowAll, onCopySegment, onCopyAll, onGoSettings, onSeek } = props;
+      const translateOn = Boolean(props.translateOn);
+      const translateState = props.translate || EMPTY_TRANSLATION;
+      const follow = props.follow !== false;
+      const targetLang = props.targetLang || 'zh';
+      const currentSeconds = Number(props.currentSeconds);
+      const rowsRef = useRef({});
+      const segments = hasTranscript(doc) ? transcriptSegments(doc) : [];
+      const trMap = buildTranslationMap(translateState.data);
+      const currentIndex = (() => {
+        if (!Number.isFinite(currentSeconds) || !segments.length) return -1;
+        for (let index = 0; index < segments.length; index += 1) {
+          const start = Number(segments[index].start);
+          if (!Number.isFinite(start) || currentSeconds < start) continue;
+          const next = segments[index + 1];
+          const nextStart = next ? Number(next.start) : Infinity;
+          const boundary = Number.isFinite(nextStart) && nextStart > start ? nextStart : Infinity;
+          if (currentSeconds < boundary) return index;
+        }
+        return -1;
+      })();
+      useEffect(() => {
+        if (!follow || currentIndex < 0) return;
+        const row = rowsRef.current[currentIndex];
+        if (!row) return;
+        const rowRect = typeof row.getBoundingClientRect === 'function' ? row.getBoundingClientRect() : null;
+        const parent = row.parentElement;
+        const box = parent && typeof parent.getBoundingClientRect === 'function' ? parent.getBoundingClientRect() : null;
+        const visible = Boolean(rowRect && box && rowRect.top >= box.top && rowRect.bottom <= box.bottom);
+        if (!visible && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' });
+      }, [follow, currentIndex]);
       if (!hasTranscript(doc)) {
         return h('div', { className: 'dvv-tabpane' }, h('div', { className: 'dvv-notice' }, [
           h('div', { key: 't', className: 'dvv-notice-title' }, '这个视频没拿到字幕'),
@@ -955,36 +1045,72 @@ window.__ModuleLoader__.load({
           h('div', { key: 'a', className: 'dvv-actions' }, h('button', { type: 'button', className: 'dvv-btn', 'data-primary': 'true', onClick: onGoSettings }, '去设置')),
         ]));
       }
-      const segments = transcriptSegments(doc);
       const keyword = String(query ?? '').trim().toLowerCase();
-      const filtered = keyword ? segments.filter((segment) => String(segment.text ?? '').toLowerCase().includes(keyword)) : segments;
-      const shown = !showAll && filtered.length > SEGMENT_LIMIT ? filtered.slice(0, SEGMENT_LIMIT) : filtered;
-      return h('div', { className: 'dvv-tabpane' }, [
+      const entries = segments.map((segment, index) => {
+        const translation = translationOf(trMap, segment);
+        return { segment, index, translation };
+      }).filter((entry) => {
+        if (!keyword) return true;
+        const source = String(entry.segment.text ?? '').toLowerCase();
+        return source.includes(keyword) || (entry.translation && entry.translation.toLowerCase().includes(keyword));
+      });
+      const shown = !showAll && entries.length > SEGMENT_LIMIT ? entries.slice(0, SEGMENT_LIMIT) : entries;
+      const parts = [
         h('div', { key: 'bar', className: 'dvv-segbar' }, [
           h('input', {
             key: 'q', className: 'dvv-search', value: query, placeholder: '在字幕里搜索关键词…', 'aria-label': '搜索字幕',
             onChange: (event) => onQuery(event.target.value),
           }),
-          h('span', { key: 'count', className: 'dvv-note' }, `共 ${filtered.length} 条${keyword ? ` / 全部 ${segments.length} 条` : ''}`),
-          h('button', { key: 'copy', type: 'button', className: 'dvv-btn', disabled: !filtered.length, onClick: () => onCopyAll(filtered) }, '复制全部'),
-        ]),
+          h('span', { key: 'count', className: 'dvv-note' }, `共 ${entries.length} 条${keyword ? ` / 全部 ${segments.length} 条` : ''}`),
+          h('button', {
+            key: 'tr', type: 'button', className: 'dvv-btn',
+            'data-active': translateOn ? 'true' : undefined,
+            title: translateOn ? '关闭双语对照' : '显示原文与译文对照',
+            onClick: () => { if (typeof props.onToggleTranslate === 'function') props.onToggleTranslate(); },
+          }, '双语'),
+          translateOn ? h('select', {
+            key: 'lang', className: 'dvv-select', value: targetLang, 'aria-label': '翻译目标语言',
+            onChange: (event) => { if (typeof props.onTargetLang === 'function') props.onTargetLang(event.target.value); },
+          }, TRANSLATE_LANGS.map(([key, label]) => h('option', { key, value: key }, label))) : null,
+          h('button', {
+            key: 'follow', type: 'button', className: 'dvv-btn',
+            'data-active': follow ? 'true' : undefined,
+            title: follow ? '关闭跟随播放高亮' : '开启跟随播放高亮',
+            onClick: () => { if (typeof props.onToggleFollow === 'function') props.onToggleFollow(); },
+          }, '跟随'),
+          h('button', { key: 'copy', type: 'button', className: 'dvv-btn', disabled: !entries.length, onClick: () => onCopyAll(shown) }, '复制全部'),
+        ].filter(Boolean)),
+        translateOn && translateState.loading ? h('div', { key: 'trload', className: 'dvv-tr-progress' }, [
+          h('span', { key: 'p', className: 'dvv-note' }, translateState.phase || '正在翻译字幕…'),
+          h(AsrProgress, { key: 'g', percent: translateState.percent }),
+          h('button', { key: 'c', type: 'button', className: 'dvv-btn', onClick: () => { if (typeof props.onCancelTranslate === 'function') props.onCancelTranslate(); } }, '取消'),
+        ]) : null,
+        translateOn && translateState.error ? h('div', { key: 'trerr', className: 'dvv-error dvv-tr-error' }, [
+          h('span', { key: 'e' }, translateState.error),
+          h('button', { key: 'r', type: 'button', className: 'dvv-btn', onClick: () => { if (typeof props.onRetryTranslate === 'function') props.onRetryTranslate(); } }, '重试'),
+        ]) : null,
         !segments.length ? h('div', { key: 'empty', className: 'dvv-note' }, '这个视频的字幕是空的。') : null,
-        segments.length && !filtered.length ? h('div', { key: 'nomatch', className: 'dvv-note' }, '没有匹配的字幕。') : null,
-        h('div', { key: 'list', className: 'dvv-segs' }, shown.map((segment, index) => h('button', {
-          key: `seg-${index}`, type: 'button', className: 'dvv-seg',
+        segments.length && !entries.length ? h('div', { key: 'nomatch', className: 'dvv-note' }, '没有匹配的字幕。') : null,
+        h('div', { key: 'list', className: 'dvv-segs' }, shown.map((entry) => h('button', {
+          key: `seg-${entry.index}`, type: 'button', className: 'dvv-seg',
+          'data-tr': translateOn ? 'true' : undefined,
+          'data-current': entry.index === currentIndex ? 'true' : undefined,
+          ref: (node) => { rowsRef.current[entry.index] = node; },
           onClick: () => {
-            onCopySegment(segment); // 原有行为：点单条复制
-            const start = Number(segment.start);
+            onCopySegment(entry.segment); // 原有行为：点单条复制
+            const start = Number(entry.segment.start);
             if (Number.isFinite(start)) onSeek(start); // 同时跳转播放位置
           },
         }, [
-          h('span', { key: 't', className: 'dvv-seg-time' }, `[${fmtTime(segment.start)}]`),
-          h('span', { key: 'x', className: 'dvv-seg-text' }, segment.text),
-        ]))),
-        filtered.length > SEGMENT_LIMIT && !showAll
-          ? h('div', { key: 'more', className: 'dvv-actions' }, h('button', { type: 'button', className: 'dvv-btn', onClick: onShowAll }, `显示全部（${filtered.length} 条）`))
+          h('span', { key: 't', className: 'dvv-seg-time' }, `[${fmtTime(entry.segment.start)}]`),
+          h('span', { key: 'x', className: 'dvv-seg-text' }, entry.segment.text),
+          entry.translation ? h('span', { key: 'tr', className: 'dvv-tr-text' }, entry.translation) : null,
+        ].filter(Boolean)))),
+        entries.length > SEGMENT_LIMIT && !showAll
+          ? h('div', { key: 'more', className: 'dvv-actions' }, h('button', { type: 'button', className: 'dvv-btn', onClick: onShowAll }, `显示全部（${entries.length} 条）`))
           : null,
-      ].filter(Boolean));
+      ].filter(Boolean);
+      return h('div', { className: 'dvv-tabpane' }, parts);
     }
 
     /* -------------------------------------------------------------- 追问对话框 */
@@ -1108,6 +1234,50 @@ window.__ModuleLoader__.load({
         return `画面描述没生成成：${message}。分镜只需要画面时可以关掉「附画面描述」再重试。`;
       }
       return `生成分镜失败：${message}`;
+    }
+
+    /** 目标语言：按字幕语言推断（中文字幕 → 英文，其余 → 中文）。 */
+    function preferredTranslateLang(doc) {
+      const lang = String((doc && doc.transcript && doc.transcript.lang) || '').toLowerCase();
+      return /(zh|chi|chinese|中文|cmn|yue)/.test(lang) ? 'en' : 'zh';
+    }
+
+    /** 翻译进度 stage → 中文文案。 */
+    function translateStageText(stage) {
+      return TRANSLATE_STAGE_LABEL[stage] ?? '';
+    }
+
+    /** 翻译错误：code → 用户能看懂的中文。 */
+    function friendlyTranslateError(error) {
+      const code = String((error && error.code) || '');
+      const message = String((error && error.message) || error || '未知错误');
+      if (code === 'no-transcript') return '这个视频还没有转写稿：先在设置里本地转写，或换一个带字幕的视频。';
+      if (code === 'bad-lang') return '只支持中文 / English 两种目标语言。';
+      if (code === 'bad-json') return '译文格式不对，重试一次就好。';
+      if (code === 'no-route') return '没有可用的模型：请先在 Harness 里选择一个模型。';
+      if (code === 'llm-failed') return `翻译失败：${message}。可以重试一次。`;
+      if (code === 'aborted') return '已取消翻译。';
+      if (code === 'internal') return `翻译失败：${message}`;
+      return `翻译失败：${message}`;
+    }
+
+    /** 译文按「开始秒」对回字幕段落（host 的 translations 与 segments 同序同时间轴）。 */
+    function buildTranslationMap(data) {
+      const map = new Map();
+      const list = Array.isArray(data && data.translations) ? data.translations : [];
+      for (const item of list) {
+        if (!item || typeof item !== 'object') continue;
+        const start = Number(item.start);
+        const text = typeof item.translation === 'string' ? item.translation.trim() : '';
+        if (Number.isFinite(start) && text) map.set(Math.round(start * 1000), text);
+      }
+      return map;
+    }
+
+    function translationOf(map, segment) {
+      if (!map || !segment) return '';
+      const start = Number(segment.start);
+      return Number.isFinite(start) ? map.get(Math.round(start * 1000)) || '' : '';
     }
 
     function mindmapNodeWidth(depth) {
@@ -1842,6 +2012,11 @@ window.__ModuleLoader__.load({
       const [openChapter, setOpenChapter] = useState(-1);
       const [segQuery, setSegQuery] = useState('');
       const [segAll, setSegAll] = useState(false);
+      const [translateOn, setTranslateOn] = useState(false);
+      const [trLang, setTrLang] = useState('');
+      const [follow, setFollow] = useState(true);
+      const [currentSeconds, setCurrentSeconds] = useState(null);
+      const [translation, setTranslation] = useState(EMPTY_TRANSLATION);
       const [chat, setChat] = useState([]);
       const [askInput, setAskInput] = useState('');
       const [askBusy, setAskBusy] = useState(false);
@@ -1876,6 +2051,8 @@ window.__ModuleLoader__.load({
       const pendingSeek = useRef(null);
       /** 自动转写判重：docId → running | done | cancelled | failed | manual（同一视频不重复自动触发）。 */
       const autoAsrRef = useRef(new Map());
+      /** 双语翻译请求的独立 AbortController（不打断总结 / 追问）。 */
+      const translationAbort = useRef(null);
       docRef.current = doc;
       chatRef.current = chat;
 
@@ -1894,6 +2071,42 @@ window.__ModuleLoader__.load({
         showToast(ok ? (okMessage || '已复制') : '复制失败，请手动选中文本复制');
         return ok;
       }, [showToast]);
+
+      /** 把当前视频的总结 + 章节拼成 Markdown 笔记写入剪贴板。 */
+      const copyMarkdown = useCallback(async () => {
+        const target = docRef.current;
+        if (!target) return;
+        const markdown = buildNoteMarkdown(target, { summary: summary.text, chapters: chapters.items });
+        if (!markdown.trim()) { showToast('先生成总结再复制'); return; }
+        const ok = await copyText(markdown);
+        showToast(ok ? `已复制 Markdown（${markdown.length} 字）` : '复制失败，请手动选择文本复制');
+      }, [summary.text, chapters.items, showToast]);
+
+      /** 用 Blob + 隐藏 <a download> 把笔记保存为 .md 文件。 */
+      const downloadMarkdown = useCallback(() => {
+        const target = docRef.current;
+        if (!target) return;
+        const markdown = buildNoteMarkdown(target, { summary: summary.text, chapters: chapters.items });
+        if (!markdown.trim()) { showToast('先生成总结再下载'); return; }
+        try {
+          if (typeof Blob === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+            throw new Error('当前环境不支持下载文件');
+          }
+          const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+          const objectUrl = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = objectUrl;
+          anchor.download = `${sanitizeFileName(target.title || target.docId || 'video-note').slice(0, 60)}.md`;
+          anchor.style.display = 'none';
+          document.body.appendChild(anchor);
+          anchor.click();
+          document.body.removeChild(anchor);
+          setTimeout(() => { try { URL.revokeObjectURL(objectUrl); } catch { /* ignore */ } }, 1000);
+          showToast('已下载 Markdown 文件');
+        } catch (caught) {
+          showToast(`下载失败：${String(caught && caught.message ? caught.message : caught)}`);
+        }
+      }, [summary.text, chapters.items, showToast]);
 
       const refreshStatus = useCallback(async () => {
         try {
@@ -2041,6 +2254,20 @@ window.__ModuleLoader__.load({
         return () => { try { window.removeEventListener('message', onWrapperMessage); } catch { /* ignore */ } };
       }, [postWrapperSeek]);
 
+      /** 播放器外壳每秒上报的播放位置（dsh-video:time）→ 原文页跟随高亮。 */
+      useEffect(() => {
+        const onTimeMessage = (event) => {
+          const data = event && event.data;
+          if (!data || typeof data !== 'object' || data.type !== 'dsh-video:time') return;
+          const seconds = Number(data.seconds);
+          if (!Number.isFinite(seconds) || seconds < 0) return;
+          setCurrentSeconds(seconds);
+        };
+        try { window.addEventListener('message', onTimeMessage); }
+        catch { return undefined; }
+        return () => { try { window.removeEventListener('message', onTimeMessage); } catch { /* ignore */ } };
+      }, []);
+
       const abortActive = useCallback(() => {
         const current = active.current;
         active.current = null;
@@ -2061,11 +2288,17 @@ window.__ModuleLoader__.load({
       }, [abortActive]);
 
       const resetPanels = useCallback(() => {
+        if (translationAbort.current) { try { translationAbort.current.abort(); } catch { /* ignore */ } }
+        translationAbort.current = null;
         setSummary(EMPTY_SUMMARY);
         setChapters(EMPTY_CHAPTERS);
         setOpenChapter(-1);
         setSegQuery('');
         setSegAll(false);
+        setTranslateOn(false);
+        setTrLang('');
+        setCurrentSeconds(null);
+        setTranslation(EMPTY_TRANSLATION);
         setChat([]);
         setAskInput('');
         setAskBusy(false);
@@ -2499,6 +2732,112 @@ window.__ModuleLoader__.load({
         showToast('已取消生成分镜');
       }, [abortActive, showToast]);
 
+      /* ---- 原文双语对照：GET /translate 读缓存，没有就 POST SSE 生成（独立取消，不打断其它请求） ---- */
+
+      const loadTranslation = useCallback(async (video, lang, options) => {
+        const target = video ?? docRef.current;
+        const targetLang = lang || preferredTranslateLang(target);
+        if (!target || !target.docId || !hasTranscript(target) || !mounted.current) return;
+        if (translationAbort.current) { try { translationAbort.current.abort(); } catch { /* ignore */ } }
+        const controller = new AbortController();
+        translationAbort.current = controller;
+        setTranslation({ ...EMPTY_TRANSLATION, lang: targetLang, loading: true, phase: '正在读取翻译缓存…' });
+        try {
+          const cached = await call('translate', { docId: target.docId, lang: targetLang }, { signal: controller.signal });
+          if (!mounted.current || controller.signal.aborted) return;
+          if (cached && Array.isArray(cached.translations) && cached.translations.length) {
+            setTranslation({
+              lang: cached.lang || targetLang, loading: false, phase: '', percent: null, error: '', code: '',
+              data: cached, cached: true, createdAt: Number(cached.createdAt) || 0,
+            });
+            return;
+          }
+        } catch (caught) {
+          if (caught && caught.name === 'AbortError') return;
+          /* 缓存读取失败就继续走生成 */
+        }
+        if (!mounted.current || controller.signal.aborted) return;
+        setTranslation((current) => ({ ...current, loading: true, phase: '正在翻译字幕…', percent: null }));
+        let finished = false;
+        try {
+          await streamSSE('translate', {
+            docId: target.docId,
+            url: target.url,
+            lang: targetLang,
+            force: options && options.force ? true : undefined,
+          }, {
+            signal: controller.signal,
+            onEvent: (event) => {
+              if (!mounted.current || controller.signal.aborted) return 'stop';
+              const type = event && event.type;
+              if (type === 'phase') {
+                setTranslation((current) => ({ ...current, phase: String(event.text ?? '') || current.phase }));
+                return undefined;
+              }
+              if (type === 'progress') {
+                const raw = event.percent;
+                const percent = raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
+                const stage = translateStageText(event.stage);
+                setTranslation((current) => ({
+                  ...current,
+                  percent: Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null,
+                  phase: stage || current.phase,
+                }));
+                return undefined;
+              }
+              if (type === 'done') {
+                finished = true;
+                const translations = Array.isArray(event.translations) ? event.translations : [];
+                const data = {
+                  docId: event.docId || target.docId,
+                  lang: event.lang || targetLang,
+                  langLabel: event.langLabel || '',
+                  count: Number(event.count) || translations.length,
+                  translations,
+                };
+                setTranslation({
+                  lang: data.lang, loading: false, phase: '', percent: null, error: '', code: '',
+                  data, cached: Boolean(event.cached), createdAt: 0,
+                });
+                return 'stop';
+              }
+              if (type === 'error') {
+                finished = true;
+                setTranslation((current) => ({
+                  ...current, loading: false, phase: '', percent: null,
+                  error: friendlyTranslateError({ code: event.code, message: event.message }),
+                  code: String(event.code || ''),
+                }));
+                return 'stop';
+              }
+              return undefined;
+            },
+          });
+          if (!finished && mounted.current && !controller.signal.aborted) {
+            setTranslation((current) => ({ ...current, loading: false, phase: '', percent: null, error: '连接中断了，没拿到译文，请重试。' }));
+          }
+        } catch (caught) {
+          if (caught && caught.name === 'AbortError') {
+            if (mounted.current) setTranslation((current) => ({ ...current, loading: false, phase: '', percent: null }));
+          } else if (mounted.current) {
+            setTranslation((current) => ({
+              ...current, loading: false, phase: '', percent: null,
+              error: friendlyTranslateError(caught),
+              code: String((caught && caught.code) || ''),
+            }));
+          }
+        } finally {
+          if (translationAbort.current === controller) translationAbort.current = null;
+        }
+      }, []);
+
+      /** 取消翻译（保留已翻译内容）。 */
+      const cancelTranslation = useCallback(() => {
+        if (translationAbort.current) { try { translationAbort.current.abort(); } catch { /* ignore */ } translationAbort.current = null; }
+        setTranslation((current) => ({ ...current, loading: false, phase: '', percent: null }));
+        showToast('已取消翻译');
+      }, [showToast]);
+
       /* ---- 无字幕自动转写：asr 开启且 autoTranscribe 为真时自动跑一次（同一视频只触发一次） ---- */
 
       useEffect(() => {
@@ -2526,6 +2865,17 @@ window.__ModuleLoader__.load({
         if (tab !== 'storyboard' || !doc || storyboard.loading || storyboard.data || storyboard.error) return;
         void loadStoryboard(doc, { describe: sbDescribe });
       }, [tab, doc, storyboard.loading, storyboard.data, storyboard.error, sbDescribe, loadStoryboard]);
+
+      /* ---- 双语懒加载：切到原文页、开启双语且当前语言还没数据时才请求（缓存优先，错误后等用户重试） ---- */
+
+      const translateTarget = trLang || preferredTranslateLang(doc);
+
+      useEffect(() => {
+        if (!translateOn || tab !== 'transcript' || !doc || !hasTranscript(doc)) return;
+        if (translation.loading || translation.error) return;
+        if (translation.data && translation.lang === translateTarget) return;
+        void loadTranslation(doc, translateTarget, {});
+      }, [translateOn, tab, doc, translateTarget, translation.loading, translation.data, translation.lang, translation.error, loadTranslation]);
 
       /* ---- 解析：/resolve 可 aborts，切换视频时中断上一条 ---- */
 
@@ -2706,7 +3056,14 @@ window.__ModuleLoader__.load({
       const copyAllSegments = (list) => {
         const items = list ?? [];
         if (!items.length) { showToast('没有可复制的字幕'); return; }
-        void copy(items.map((segment) => `[${fmtTime(segment.start)}] ${segment.text}`).join('\n'), `已复制 ${items.length} 条字幕`);
+        const lines = [];
+        for (const item of items) {
+          const segment = item && item.segment ? item.segment : item;
+          if (!segment) continue;
+          lines.push(`[${fmtTime(segment.start)}] ${segment.text}`);
+          if (item && item.translation) lines.push(`  译文：${item.translation}`);
+        }
+        void copy(lines.join('\n'), `已复制 ${items.length} 条字幕`);
       };
 
       let tabBody = null;
@@ -2717,6 +3074,8 @@ window.__ModuleLoader__.load({
             onRun: () => { void runSummary(doc); },
             onStop: stopSummary,
             onCopy: () => { void copy(summary.text, '已复制总结'); },
+            onCopyMarkdown: () => { void copyMarkdown(); },
+            onDownloadMarkdown: downloadMarkdown,
             onGoSettings: openSettings,
             onSeek: seekTo,
           });
@@ -2736,6 +3095,13 @@ window.__ModuleLoader__.load({
             onCopyAll: copyAllSegments,
             onGoSettings: openSettings,
             onSeek: seekTo,
+            translate: translation, translateOn, targetLang: translateTarget,
+            follow, currentSeconds,
+            onToggleTranslate: () => setTranslateOn((value) => !value),
+            onTargetLang: (lang) => setTrLang(lang),
+            onToggleFollow: () => setFollow((value) => !value),
+            onCancelTranslate: cancelTranslation,
+            onRetryTranslate: () => { void loadTranslation(doc, translateTarget, { force: true }); },
           });
         } else if (tab === 'mindmap') {
           tabBody = h(MindmapTab, {
@@ -2975,6 +3341,8 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-caret{display:inline-block;width:7px;height:14px;vertical-align:-2px;margin-left:2px;background:var(--dsw-alias-brand-primary);animation:dvv-blink 1s steps(2,start) infinite}
 @keyframes dvv-blink{50%{opacity:0}}
 .dvv-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 0 2px}
+.dvv-actions-spacer{flex:1}
+.dvv-btn[disabled]{opacity:.55;cursor:not-allowed}
 .dvv-loading-block{display:flex;align-items:center;gap:8px;padding:14px 0;font-size:12px;line-height:19px;color:var(--dsw-alias-label-secondary)}
 .dvv-spinner{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid var(--dsw-alias-border-l2,rgba(127,127,127,.35));border-top-color:var(--dsw-alias-brand-primary);animation:dvv-spin .8s linear infinite}
 @keyframes dvv-spin{to{transform:rotate(360deg)}}
@@ -3138,6 +3506,13 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-sb-note{font-size:11px;line-height:17px;color:var(--dsw-alias-label-secondary)}
 .dvv-sb-broken{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:220px;padding:24px;border:1px dashed var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);text-align:center}
 .dvv-sb-broken-title{font-size:13px;line-height:20px;font-weight:600;color:var(--dsw-alias-label-primary)}
+.dvv-btn[data-active="true"]{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}
+.dvv-tr-progress{display:flex;align-items:center;gap:10px;margin:2px 0 8px}
+.dvv-tr-progress .dvv-progress{flex:1}
+.dvv-tr-error{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:2px 0 8px}
+.dvv-seg[data-tr="true"]{flex-wrap:wrap}
+.dvv-seg[data-current="true"]{background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.12));box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}
+.dvv-tr-text{flex:1 0 100%;margin:2px 0 0 56px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);word-break:break-word}
 @media (max-width:979px){
   /* 单列：播放器 → 页签（含字幕提示条） → 追问对话框，整页滚动。
      两栏用 display:contents 摊平，再靠 order 重排。 */
@@ -3217,7 +3592,7 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
       apply,
       inject,
       // 布局是纯函数，暴露给测试直接断言坐标/连线（Host 会忽略额外字段）。
-      __test: { buildMindmapLayout, mindmapTextLines, defaultMindmapExpanded, allMindmapPaths, renderMarkdown, clockToSeconds },
+      __test: { buildMindmapLayout, mindmapTextLines, defaultMindmapExpanded, allMindmapPaths, renderMarkdown, clockToSeconds, buildNoteMarkdown, sanitizeFileName },
     };
     return exports_;
   },

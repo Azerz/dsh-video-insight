@@ -124,6 +124,14 @@ function renderNode(node, path) {
   host.children = flattenChildren(node.children)
     .map((child, index) => renderNode(child, `${path}/${host.tag}[${index}]`))
     .filter(Boolean);
+  host.getBoundingClientRect = () => {
+    const isRow = String(host.props.className || '').split(/\s+/).includes('dvv-seg');
+    if (sandbox.__rectMode === 'visible') return { top: 10, bottom: 20, left: 0, right: 200 };
+    return isRow
+      ? { top: 400, bottom: 420, left: 0, right: 200 }
+      : { top: 0, bottom: 100, left: 0, right: 200 };
+  };
+  host.scrollIntoView = (options) => { sandbox.__scrollCalls.push({ node: host, options }); };
   if (host.tag === 'iframe') {
     let win = frameWindows.get(path);
     if (!win) {
@@ -132,6 +140,7 @@ function renderNode(node, path) {
     }
     host.contentWindow = win;
   }
+  for (const child of host.children) child.parentElement = host;
   const ref = host.props.ref;
   if (typeof ref === 'function') ref(host);
   else if (ref && typeof ref === 'object') ref.current = host;
@@ -208,15 +217,31 @@ function createSandbox() {
   const styleTags = [];
   const store = new Map();
   const listeners = new Map();
+  const downloads = [];
+  const blobs = [];
+  const revoked = [];
+  const clipboardWrites = [];
+  const bodyChildren = [];
+  class SandboxURL extends URL {
+    static createObjectURL(blob) { blobs.push(blob); return `blob:test/${blobs.length}`; }
+    static revokeObjectURL(url) { revoked.push(String(url)); }
+  }
   const doc = {
     baseURI: 'http://panel.test/',
     head: { append(node) { styleTags.push(node); } },
-    body: { appendChild() {} },
+    body: {
+      appendChild(node) { bodyChildren.push(node); },
+      removeChild(node) { const index = bodyChildren.indexOf(node); if (index >= 0) bodyChildren.splice(index, 1); },
+    },
     createElement(tag) {
       return {
         tag, dataset: {}, style: {}, textContent: '', children: [],
         setAttribute(key, value) { this[key] = value; },
         append() {}, select() {},
+        click() {
+          if (this.tag === 'a') downloads.push({ href: this.href, download: this.download });
+          this.__clicked = true;
+        },
       };
     },
     execCommand() { return true; },
@@ -225,9 +250,9 @@ function createSandbox() {
   const sandbox = {
     console,
     setTimeout, clearTimeout, setInterval, clearInterval,
-    URL, URLSearchParams, TextDecoder, TextEncoder, AbortController,
+    URL: SandboxURL, URLSearchParams, TextDecoder, TextEncoder, AbortController, Blob,
     document: doc,
-    navigator: { clipboard: { writeText: async () => true } },
+    navigator: { clipboard: { writeText: async (text) => { clipboardWrites.push(String(text)); return true; } } },
     localStorage: {
       getItem: (key) => (store.has(String(key)) ? store.get(String(key)) : null),
       setItem: (key, value) => { store.set(String(key), String(value)); },
@@ -251,7 +276,13 @@ function createSandbox() {
   sandbox.__calls = calls;
   sandbox.__listeners = listeners;
   sandbox.__styleTags = styleTags;
+  sandbox.__scrollCalls = [];
+  sandbox.__rectMode = 'hidden';
   sandbox.__store = store;
+  sandbox.__downloads = downloads;
+  sandbox.__blobs = blobs;
+  sandbox.__revoked = revoked;
+  sandbox.__clipboardWrites = clipboardWrites;
   sandbox.fetch = (input, init) => fakeFetch(input, init, calls);
   return sandbox;
 }
@@ -611,6 +642,33 @@ const STORYBOARD_EVENTS = [
   { type: 'done', cached: false, docId: 'bilibili:BV1xx411c7mD', storyboard: STORYBOARD_VALUE },
 ];
 
+const TRANSLATE_TEXTS = {
+  en: [
+    'Hi everyone, today we talk about AI coding',
+    'First principles is about the most essential question',
+    'Attention economy fragments content',
+  ],
+  zh: ['中文译文第一句', '中文译文第二句', '中文译文第三句'],
+};
+
+function translateEvents(lang) {
+  const texts = TRANSLATE_TEXTS[lang] || TRANSLATE_TEXTS.en;
+  return [
+    { type: 'phase', text: lang === 'zh' ? '正在把字幕翻译成中文…' : '正在把字幕翻译成英文…' },
+    { type: 'progress', stage: 'translate', percent: 40 },
+    {
+      type: 'done', docId: 'bilibili:BV1xx411c7mD', lang,
+      langLabel: lang === 'zh' ? '中文' : 'English', cached: false, count: SEGMENTS.length,
+      translations: SEGMENTS.map((segment, index) => ({
+        start: segment.start, end: segment.end, text: segment.text,
+        translation: texts[index] || `translation ${index}`,
+      })),
+    },
+  ];
+}
+
+let translateCache = null;
+
 let historyItems = [
   {
     docId: 'bilibili:BV1xx411c7mD', url: BILI_DOC.url, platform: 'bilibili', id: 'BV1xx411c7mD',
@@ -627,6 +685,7 @@ let historyItems = [
 ];
 
 function resetRoutes() {
+  translateCache = null;
   routes = {
     status: () => ({ ok: true, value: STATUS }),
     history: () => ({ ok: true, value: { items: historyItems } }),
@@ -667,6 +726,11 @@ function resetRoutes() {
     mindmap: () => ({ ok: true, value: MINDMAP_VALUE }),
     analyze: (call) => ({ __sse: call.body && call.body.mode === 'ask' ? ASK_EVENTS : SUMMARY_EVENTS }),
     transcribe: () => ({ __sse: TRANSCRIBE_EVENTS }),
+    translate: (call) => {
+      if (call.method === 'GET') return { ok: true, value: translateCache };
+      const lang = String((call.body && call.body.lang) || 'en');
+      return { __sse: translateEvents(lang) };
+    },
     storyboard: (call) => {
       if (call.method === 'GET') return { ok: true, value: null };
       return { __sse: STORYBOARD_EVENTS };
@@ -698,6 +762,23 @@ check('factory 返回 apply', typeof exports_.apply === 'function');
 check('inject 含 slots 与 layout', Array.isArray(exports_.inject) && exports_.inject.includes('slots') && exports_.inject.includes('layout'));
 check('暴露 __test 纯函数', Boolean(exports_.__test && typeof exports_.__test.buildMindmapLayout === 'function'
   && typeof exports_.__test.renderMarkdown === 'function' && typeof exports_.__test.clockToSeconds === 'function'));
+
+// buildNoteMarkdown：标题 / 来源行 / 正文 / 章节
+const mdAll = exports_.__test.buildNoteMarkdown(BILI_DOC, { summary: SUMMARY_TEXT, chapters: CHAPTERS_VALUE.chapters });
+check('buildNoteMarkdown 暴露', typeof exports_.__test.buildNoteMarkdown === 'function');
+check('buildNoteMarkdown 标题行', mdAll.startsWith(`# ${BILI_DOC.title}\n`));
+checkIncludes('buildNoteMarkdown 来源行', mdAll, `> 哔哩哔哩 · ${BILI_DOC.author} · 12:34 · ${BILI_DOC.url}`);
+checkIncludes('buildNoteMarkdown 保留总结正文', mdAll, '## 结论');
+checkIncludes('buildNoteMarkdown 保留列表', mdAll, '- 要点一');
+checkIncludes('buildNoteMarkdown 章节段', mdAll, '## 章节');
+checkIncludes('buildNoteMarkdown 章节第一行', mdAll, '- [0:00] 开场');
+checkIncludes('buildNoteMarkdown 章节第二行', mdAll, '- [1:02] 核心论点');
+check('buildNoteMarkdown 没有空 · 分隔', !mdAll.includes('· ·') && !/>\s*·/m.test(mdAll));
+const mdNoChapters = exports_.__test.buildNoteMarkdown(BILI_DOC, { summary: '一段总结', chapters: [] });
+check('buildNoteMarkdown chapters 为空时无章节段', !mdNoChapters.includes('## 章节') && mdNoChapters.includes('一段总结'));
+const mdSparse = exports_.__test.buildNoteMarkdown({ title: '只有标题', platform: 'youtube', url: 'https://youtu.be/x' }, { summary: '', chapters: [] });
+check('buildNoteMarkdown 缺项省略不留空 ·', mdSparse.includes('> YouTube · https://youtu.be/x') && !mdSparse.includes('· ·'));
+check('sanitizeFileName 去掉非法字符', exports_.__test.sanitizeFileName('a/b:c*?"<>|d') === 'a b c d');
 
 const registered = [];
 const layoutCalls = [];
@@ -816,6 +897,20 @@ checkIncludes('总结渲染行内代码', nodeText(tree), '代码');
 checkIncludes('总结把 [00:08] 渲染为时间徽标', JSON.stringify(allByClass(tree, 'dvv-md').map(nodeText)), '00:08');
 check('总结完成后有重新生成按钮', Boolean(buttonByText(tree, '重新生成')));
 check('总结完成后有复制按钮', Boolean(buttonByText(tree, '复制')));
+check('总结页有「复制 Markdown」按钮', Boolean(buttonByText(tree, '复制 Markdown')));
+check('总结页有「下载 .md」按钮', Boolean(buttonByText(tree, '下载 .md')));
+const expectedMd = exports_.__test.buildNoteMarkdown(BILI_DOC, { summary: SUMMARY_TEXT, chapters: null });
+clickText(tree, '复制 Markdown');
+tree = await settle();
+check('复制 Markdown 写入剪贴板', sandbox.__clipboardWrites.length === 1 && sandbox.__clipboardWrites[0] === expectedMd);
+checkIncludes('复制 Markdown 提示字数', nodeText(tree), '已复制 Markdown（');
+clickText(tree, '下载 .md');
+tree = await settle();
+await new Promise((resolve) => setTimeout(resolve, 1100));
+check('下载 .md 触发 a[download]', sandbox.__downloads.length === 1 && /\.md$/.test(sandbox.__downloads[0].download));
+check('下载文件名为视频标题', sandbox.__downloads[0] && sandbox.__downloads[0].download === `${BILI_DOC.title}.md`);
+check('下载 blob 类型为 markdown', sandbox.__blobs.length === 1 && String(sandbox.__blobs[0].type).includes('text/markdown'));
+check('下载后 revokeObjectURL', sandbox.__revoked.length === 1);
 checkIncludes('页签包含分镜', nodeText(byClass(tree, 'dvv-tabbar')), '分镜');
 check('页签共 5 个', allByClass(tree, 'dvv-tab').length === 5);
 
@@ -868,6 +963,74 @@ click(segs[2]);
 tree = await settle();
 const segFrame = allByTag(tree, 'iframe')[0];
 check('点击字幕发送 seek 到外壳', Boolean(segFrame) && segFrame.contentWindow.messages.some((msg) => msg && msg.seconds === 62));
+
+/* ---------------------------------------------------------------- 双语对照 */
+
+const trGetsBefore = callsOf('translate').filter((call) => call.method === 'GET').length;
+const trPostsBefore = callsOf('translate').filter((call) => call.method === 'POST').length;
+clickText(tree, '双语');
+tree = await settle(60);
+const trGets = callsOf('translate').filter((call) => call.method === 'GET');
+const trPosts = callsOf('translate').filter((call) => call.method === 'POST');
+check('开启双语先 GET 翻译缓存', trGets.length === trGetsBefore + 1);
+check('没有缓存时 POST /translate 生成', trPosts.length === trPostsBefore + 1);
+check('双语默认目标语言按字幕推断为 en', (trGets[trGets.length - 1] || {}).params.lang === 'en' && (trPosts[trPosts.length - 1] || {}).body.lang === 'en');
+check('译文行数量 = 段落数量', allByClass(tree, 'dvv-tr-text').length === 3);
+checkIncludes('译文内容渲染', nodeText(tree), 'Hi everyone');
+const trBtn = buttonByText(tree, '双语');
+check('双语开关处于激活态', Boolean(trBtn) && trBtn.props['data-active'] === 'true');
+
+// 搜索同时匹配译文
+change(byClass(tree, 'dvv-search'), 'Attention');
+tree = await settle();
+checkIncludes('搜索译文词命中一条', nodeText(tree), '共 1 条');
+check('搜索译文词仍渲染译文行', allByClass(tree, 'dvv-tr-text').length === 1);
+change(byClass(tree, 'dvv-search'), '');
+tree = await settle();
+
+// 复制全文带译文缩进
+clickText(tree, '复制全部');
+tree = await settle();
+const trCopy = sandbox.__clipboardWrites[sandbox.__clipboardWrites.length - 1] || '';
+checkIncludes('复制全文包含译文行', trCopy, '  译文：Hi everyone');
+
+// 切换目标语言
+const langSelect = allByTag(tree, 'select').find((node) => node.props['aria-label'] === '翻译目标语言');
+check('双语开启后有目标语言下拉', Boolean(langSelect));
+change(langSelect, 'zh');
+tree = await settle(60);
+const trZhPost = callsOf('translate').filter((call) => call.method === 'POST').slice(-1)[0];
+check('切换语言请求 zh', Boolean(trZhPost) && trZhPost.body.lang === 'zh');
+checkIncludes('中文译文渲染', nodeText(tree), '中文译文第一句');
+change(allByTag(tree, 'select').find((node) => node.props['aria-label'] === '翻译目标语言'), 'en');
+tree = await settle(60);
+
+// 跟随播放高亮（dsh-video:time）
+sandbox.__rectMode = 'hidden';
+sandbox.__scrollCalls.length = 0;
+sandbox.dispatchEvent({ type: 'message', data: { type: 'dsh-video:time', seconds: 9 } });
+tree = await settle();
+const trCurrent = allByClass(tree, 'dvv-seg').filter((node) => node.props['data-current'] === 'true');
+check('跟随播放高亮当前段落', trCurrent.length === 1 && nodeText(trCurrent[0]).includes('第一性原理'));
+check('当前行不可见时调用 scrollIntoView', sandbox.__scrollCalls.length === 1 && sandbox.__scrollCalls[0].options.block === 'nearest');
+sandbox.__rectMode = 'visible';
+sandbox.__scrollCalls.length = 0;
+sandbox.dispatchEvent({ type: 'message', data: { type: 'dsh-video:time', seconds: 63 } });
+tree = await settle();
+const trCurrent2 = allByClass(tree, 'dvv-seg').filter((node) => node.props['data-current'] === 'true');
+check('高亮随播放位置移动且只有一行', trCurrent2.length === 1 && nodeText(trCurrent2[0]).includes('注意力经济'));
+check('当前行已在可视区时不滚动', sandbox.__scrollCalls.length === 0);
+clickText(tree, '跟随');
+tree = await settle();
+sandbox.__rectMode = 'hidden';
+sandbox.__scrollCalls.length = 0;
+sandbox.dispatchEvent({ type: 'message', data: { type: 'dsh-video:time', seconds: 1 } });
+tree = await settle();
+const trCurrent3 = allByClass(tree, 'dvv-seg').filter((node) => node.props['data-current'] === 'true');
+check('关闭跟随后高亮仍生效', trCurrent3.length === 1 && nodeText(trCurrent3[0]).includes('大家好'));
+check('关闭跟随后不再自动滚动', sandbox.__scrollCalls.length === 0);
+clickText(tree, '跟随');
+tree = await settle();
 
 /* ---------------------------------------------------------------- 思维导图 */
 
@@ -1056,6 +1219,7 @@ checkIncludes('告警条说明 B 站需要 Cookie', nodeText(tree), 'B 站 AI �
 clickText(tree, '原文');
 tree = await settle();
 checkIncludes('原文页解释没拿到字幕', nodeText(tree), '这个视频没拿到字幕');
+check('无转写稿时不渲染双语开关', !buttonByText(tree, '双语'));
 
 /* ---------------------------------------------------------------- 自动转写 */
 
@@ -1072,6 +1236,10 @@ checkIncludes('转写后原文页出现字幕', nodeText(tree), '本地转写第
 checkIncludes('转写来源徽标', nodeText(tree), '本地 Whisper');
 clickText(tree, '总结');
 tree = await settle();
+const mdCopyBtn = buttonByText(tree, '复制 Markdown');
+const mdDownloadBtn = buttonByText(tree, '下载 .md');
+check('总结为空时「复制 Markdown」禁用', Boolean(mdCopyBtn) && mdCopyBtn.props.disabled === true);
+check('总结为空时「下载 .md」禁用', Boolean(mdDownloadBtn) && mdDownloadBtn.props.disabled === true);
 
 /* ---------------------------------------------------------------- 错误与返回 */
 
