@@ -3,13 +3,13 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#已知限制)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.5.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.6.4-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
-DeepSeek Harness 的视频插件库里的「第二块屏」：左侧栏「知乎浏览」下面是**视频解析**入口，点开是一整页面板：**左栏**上方是内嵌播放器、下方是追问对话框，**右栏**是总结 / 章节 / 原文 / 思维导图 / 分镜。粘贴一条 YouTube 或哔哩哔哩链接，插件自己把字幕抓下来，用你当前的默认模型生成内容；点时间戳直接跳到对应位置，边看边读。左上角「← 返回」：在视频详情页点它回到插件首页（大输入框 + 最近分析），已经在首页时再点才回到会话界面。
+在侧边栏粘贴一条 YouTube / 哔哩哔哩链接：内嵌播放器边看边读，总结、章节、导图、分镜与带时间戳的 RAG 问答一次给全；没有字幕用本机 Whisper 转写，纯无声视频直接读画面，不需要额外 API key。
 
-没有字幕的视频也不至于没得看：可以用**本机 Whisper / SenseVoice 转写**兜底（可选引擎、线程、只转前 N 秒），音频全程不出这台电脑；**纯无声/纯画面视频**（没有配音也没有字幕）还能抽帧做**画面文字识别（OCR）**，甚至直接把画面交给**视觉模型**描述场景、人物和动作（「画面理解」，会用到支持图片输入的模型），把画面内容变成带时间戳的文字稿，摘要仍用你 profile 里的模型。
+字幕缺失时还有三档兜底：**本机 Whisper / SenseVoice 转写**（可选引擎、线程、只转前 N 秒），音频全程不出这台电脑；**纯无声/纯画面视频**（没有配音也没有字幕）还能抽帧做**画面文字识别（OCR）**，甚至直接把画面交给**视觉模型**描述场景、人物和动作（「画面理解」，会用到支持图片输入的模型），把画面内容变成带时间戳的文字稿，摘要仍用你 profile 里的模型。
 
 追问是 **RAG（检索增强）**：先把问题在转写稿里做 BM25 检索，只把最相关的几段（带时间戳）连同对话一起喂给模型，回答里标 `[mm:ss]`，气泡下面还有「依据」按钮，点一下直接跳回那段视频。
 
@@ -19,7 +19,7 @@ DeepSeek Harness 的视频插件库里的「第二块屏」：左侧栏「知乎
 
 ## 入口与页面
 
-左侧栏 `sidebar.panellist`，`order: 30`（排在「插件」「定时任务」「知乎浏览」之后）。图标是粉色播放键 + 星芒。
+入口在左侧栏的面板列表（`sidebar.panellist`，`order: 30`，排在默认条目之后，可按需调整）。图标是粉色播放键 + 星芒。
 
 首页是 Google 式的**居中大输入框 + 解析按钮**（粘贴链接回车即可），下面是「最近分析」的历史列表（历史区自己内联滚动，不带动整页），点历史项直接回到那个视频；不再有多余的平台介绍卡。解析出视频后才出现顶部的小号输入条，方便随时换一个链接。
 
