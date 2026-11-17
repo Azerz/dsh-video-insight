@@ -190,12 +190,12 @@ data: {"type":"error","message":"模型调用失败：…"}
     "available": true, "provider": "opencode-go", "model": "deepseek-v4.1-flash",
     "routeLabel": "opencode-go/deepseek-v4.1-flash", "supportsImage": true,
     "reason": "", "candidates": [],
-    "config": { "frameMode": "auto", "visionModel": "", "visionMaxFrames": 48 },
+    "config": { "frameMode": "auto", "visionModel": "", "visionMaxFrames": 48, "visionPack": "sheet", "sheetCols": 3, "frameSampling": "cuts", "cutThreshold": 27 },
     "privacy": "画面理解会把抽出来的画面图片交给当前模型（会离开本机）；OCR 仍然完全在本机运行。"
   },
   "config": {
     "threads": 0, "maxSeconds": 0, "keepAudio": false, "autoTranscribe": true,
-    "ocrFallback": true, "ocrIntervalSeconds": 8, "ocrMaxFrames": 120,
+    "ocrFallback": true, "ocrIntervalSeconds": 8, "ocrMaxFrames": 120, "frameSampling": "cuts", "cutThreshold": 27,
     "frameMode": "auto", "visionModel": "", "visionMaxFrames": 48
   },
   "tools": {
@@ -221,9 +221,9 @@ data: {"type":"error","message":"模型调用失败：…"}
 ```json
 { "enabled": true, "engine": "auto|whisper|sensevoice",
   "threads": 0, "maxSeconds": 0, "keepAudio": false, "autoTranscribe": true,
-  "ocrFallback": true, "ocrIntervalSeconds": 8, "ocrMaxFrames": 120,
+  "ocrFallback": true, "ocrIntervalSeconds": 8, "ocrMaxFrames": 120, "frameSampling": "cuts|uniform", "cutThreshold": 27,
   "frameMode": "auto|ocr|vision", "visionModel": "provider/model 或空",
-  "visionMaxFrames": 48 }
+  "visionMaxFrames": 48, "visionPack": "sheet|frames", "sheetCols": 3 }
 ```
 
 返回与 `GET /asr/status` 相同的 `value`（fresh）。
@@ -245,7 +245,7 @@ data: {"type":"error","code":"asr-needs-ytdlp","message":"…"}
 - 本地转写结果持久化在 `~/.dsh/video-transcripts/<docId>.json`：不带 `force` 时直接复用，`/resolve` 对没有字幕的视频也会自动挂上（`transcript.cached: true`），所以解析缓存过期后无需重跑几分钟的识别。
 - `percent` 可能为 `null`（下载阶段没有进度），客户端应显示不确定进度。
 - 成功后 host 会把新 `transcript` 写回解析缓存，后续 `/analyze`、`/chapters` 直接用。
-- `code` ∈ `asr-disabled` | `asr-no-tools` | `asr-needs-ytdlp` | `asr-download-failed` | `asr-convert-failed` | `asr-failed` | `asr-empty` | `ocr-unavailable` | `ocr-needs-ytdlp` | `ocr-no-ffmpeg` | `ocr-frames-failed` | `ocr-download-failed` | `ocr-failed` | `vision-unavailable` | `vision-no-model` | `vision-failed` | `aborted` | `bad-url` | `internal`。
+- `code` ∈ `asr-disabled` | `asr-no-tools` | `asr-needs-ytdlp` | `asr-download-failed` | `asr-convert-failed` | `asr-failed` | `asr-empty` | `ocr-unavailable` | `ocr-needs-ytdlp` | `ocr-no-ffmpeg` | `ocr-frames-failed` | `ocr-download-failed` | `ocr-failed` | `vision-unavailable` | `vision-no-model` | `vision-failed` | `sheet-empty` | `sheet-failed` | `aborted` | `bad-url` | `internal`。
 
 ### 转写流程（host 内部）
 
@@ -254,9 +254,13 @@ data: {"type":"error","code":"asr-needs-ytdlp","message":"…"}
 3. whisper.cpp（`-oj` JSON）或 sherpa-onnx SenseVoice（一行 JSON，按标点聚合成段）；
 4. 结果 < 8 字（含 whisper 的 `*music*` 等非语音占位）抛 `asr-empty`；临时目录删掉（`keepAudio` 时保留 `~/.dsh/video-models/last-audio.*`）。
 5. **画面兜底（OCR + 画面理解）**：音轨下载失败或识别出的都是 `*music*` 这类非语音时，进入画面管线：
-   - yt-dlp 下 480p 视频 → ffmpeg 每 `ocrIntervalSeconds` 秒抽一帧（最多 `ocrMaxFrames` 帧）；
+   - yt-dlp 下 480p 视频 → 抽帧：
+     - `frameSampling: cuts`（默认）：ffmpeg 把画面缩到 64×36、4fps 出 rawvideo，逐帧算 RGB 差分分数并做暗场增益，取「一帧的尖峰」（分数 ≥ `cutThreshold` 且 ≥ 邻域中位数 ×2.2）当镜头切点（阈顶 6–40、默认 27）；再按「每段镜头一张」排队——镜头比配额多时把时间轴等分成 N 段、每段取覆盖最长镜头的中点；镜头 <6 个（静态/口播）时均匀铺满。抽帧用 `-ss <秒>` 一次性定位，一张图一个进程。
+     - 切不到切点或切分失败：退回 `frameSampling: uniform`，即每 `ocrIntervalSeconds` 秒抽一帧（最多 `ocrMaxFrames` 帧）。
    - `ocrFallback` 为真且有本机 Vision 时，先离线识别画面文字（本机完成）；
    - `frameMode`：`ocr` 只用本机文字识别；`vision` 直接把抽样子集（最多 `visionMaxFrames` 帧）交给支持图片输入的模型描述画面；`auto`（默认）先跑 OCR，平均每帧文字不足 4 字时再加一轮画面理解；
+   - `visionPack`：`sheet`（默认）把这批帧用 ffmpeg `tile` 拼成一张分镜图（`sheetCols` 列、行数向上取整），提示里带「第几格 = 第几秒」对应表，模型只收一张图；拼图或解析失败时自动回落到 `frames`（逐帧发送，每批 4 张）；
+   - 分镜拼图不落盘、不画字（时间标签走提示词对应表），面板上由前端按同一份 layout 画角标；
    - 合并成带时间戳文字稿：有视觉描述时 `source = "frame-vision"`（`engine = "vision"`），只靠文字时 `source = "frame-ocr"`（`engine = "vision-ocr"`），结构与语音转写一致；
    - 视觉模型由 `visionModel`（`provider/model`）指定，留空则用当前会话默认模型；默认模型没有声明 `image` 输入能力时 `vision.available=false` 并给出候选模型提示。`/resolve` 对这类视频同样会自动挂上持久化结果，并把「没有可用字幕」的警告换成「已使用本地画面文字识别稿（OCR）」/「已使用本地画面理解稿」。
 

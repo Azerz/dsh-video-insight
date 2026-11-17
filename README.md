@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#已知限制)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.4.8-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.5.0-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -86,12 +86,14 @@ curl -L -o ggml-large-v3-turbo-q5_0.bin \
 纯音乐、无声演示、PPT 录屏这类视频，语音识别只会得到 `*music*`。插件会自动兜底到画面管线：
 
 1. yt-dlp 下载 480p 以内的视频；
-2. ffmpeg 每 8 秒抽一帧（可在设置里调 `抽帧间隔` / `最多识别帧数`）；
+2. **按镜头切点抽帧**（`frameSampling: cuts`，默认）：先扫一遍画面找剪辑点，一个镜头取一张，再按时间轴等分补齐（镜头太少时退化成均匀铺满）；切分失败会自动退回「每 `ocrIntervalSeconds` 秒抽一帧」（`frameSampling: uniform`）。阈值 `cutThreshold` 默认 27，越高只抓越明显的转场；扫描只多一次 64×36 解码（实测 10 分钟片子约 4 秒），抽帧按时间点精确定位；
 3. **本机 OCR**：用 macOS 自带的 Vision 框架离线识别中英文文字（首次使用会把一个小工具编译到 `~/.dsh/video-tools/ocr/`，约 10-20 秒，之后复用），完全不出本机；
-4. **画面理解（可选）**：把抽样的若干帧（默认最多 48 帧）作为图片交给支持图片输入的模型，让它描述画面里的场景、人物/物体、动作和画面文字；默认 `frameMode: auto` 时，只有 OCR 平均每帧不足 4 字（比如纯动画、vlog）才追加这一轮；
+4. **画面理解（可选）**：把抽样的若干帧（默认最多 48 帧）**拼成一张分镜图**（`visionPack: sheet`，默认 3 列、行数按帧数自动算）再交给支持图片输入的模型，让它按「第几格 = 第几秒」逐格描述场景、人物/物体、动作和画面文字；拼图失败会自动回落到逐帧发送（`visionPack: frames`）。默认 `frameMode: auto` 时，只有 OCR 平均每帧不足 4 字（比如纯动画、vlog）才追加这一轮；
 5. 合并成带时间戳的文字稿：有画面描述时 `source: frame-vision`（视觉模型），只有本机文字时 `source: frame-ocr`；后续总结、章节、思维导图、追问都能用。
 
-**隐私差别**：OCR 完全在本机；画面理解会把抽出来的画面图片发给当前模型（`visionModel` 留空即用会话默认模型，当前模型需声明 `image` 输入能力，否则面板会给出候选模型提示），设置里可以切换成「仅画面文字（OCR）」或关掉整个画面兜底。
+**为什么拼成一张图**：逐帧发时 12 帧就是 3 次请求、24 帧是 6 次，每张图都单独占一份图片 token；拼图后 24 帧只用 1 次请求、1 张图。实测同一段素材（Big Buck Bunny，24 帧）：输入 token 13,312 → 1,905（−86%），耗时 66.0s → 26.9s（−59%），描述覆盖度与逐帧基本一致；12 帧时也分别是 −73% 和 −38%。
+
+**隐私差别**：OCR 完全在本机；画面理解会把拼好的画面图片发给当前模型（`visionModel` 留空即用会话默认模型，当前模型需声明 `image` 输入能力，否则面板会给出候选模型提示），设置里可以切换成「仅画面文字（OCR）」或关掉整个画面兜底。
 
 识别质量取决于画面清晰度和画面文字；和真实字幕没法比。解析到无字幕视频时**默认会自动开始**这次转写（设置里可关掉「无字幕视频自动转写」）；转写完成后总结 / 章节 / 追问 / 原文全部改用新文字稿。
 
@@ -149,7 +151,7 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | GET | `/dsh-video/api/status` | `{ok,value:{version,model,bilibili:{cookie},platforms,transcriptLimitChars,asr:{enabled,ready,engine,activeEngine,engineLabel,downloadReady}}}` |
 | GET | `/dsh-video/api/resolve?url=&force=1` | 解析链接 → `VideoDoc`（失败也是 HTTP 200 + `{ok:false,code,error}`） |
 | GET | `/dsh-video/api/asr/status?fresh=1` | 本地转写组件/引擎/模型状态 + `ocr`（画面文字识别）+ `vision`（画面理解/视觉模型能力）+ `privacy` 文案 + `hints` |
-| POST | `/dsh-video/api/asr/config` | `{enabled?,engine?,threads?,maxSeconds?,keepAudio?,autoTranscribe?,ocrFallback?,ocrIntervalSeconds?,ocrMaxFrames?,frameMode?:auto\|ocr\|vision,visionModel?,visionMaxFrames?}` → 新状态 |
+| POST | `/dsh-video/api/asr/config` | `{enabled?,engine?,threads?,maxSeconds?,keepAudio?,autoTranscribe?,ocrFallback?,ocrIntervalSeconds?,ocrMaxFrames?,frameSampling?:cuts\|uniform,cutThreshold?,frameMode?:auto\|ocr\|vision,visionModel?,visionMaxFrames?,visionPack?:sheet\|frames,sheetCols?}` → 新状态 |
 | POST | `/dsh-video/api/transcribe` | SSE：`{url?/docId?, force?}`，帧 `phase` / `progress{percent,stage}` / `done{docId,transcript,cached?}` / `error{code,message}`；无语音时自动兜底 OCR / 画面理解（stage 含 `vision`） |
 | POST | `/dsh-video/api/analyze` | SSE：`{mode:'summary'\|'ask', url?/docId?, question?, history?}`，帧 `phase` / `delta` / `done` / `error` |
 | POST | `/dsh-video/api/chapters` | `{url?/docId?}` → `{ok,value:{chapters:[{start,title,gist}],duration}}` |
@@ -196,11 +198,15 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
           engine: auto          # auto | whisper | sensevoice
           autoTranscribe: true  # 解析到无字幕视频时自动本地转写
           ocrFallback: true       # 连语音都没有时，抽帧做画面文字识别（OCR）
-          ocrIntervalSeconds: 8   # 抽帧间隔（秒）
+          frameSampling: cuts     # cuts=按镜头切点抽帧（默认）| uniform=固定间隔
+          cutThreshold: 27        # 镜头切点阈值（6-40），越高越只抓明显转场
+          ocrIntervalSeconds: 8   # 退回固定间隔抽帧时的间隔（秒）
           ocrMaxFrames: 120       # 最多识别帧数
           frameMode: auto         # auto | ocr | vision（画面理解）
           visionModel: ''         # provider/model，留空用会话默认模型
-          visionMaxFrames: 48     # 画面理解最多几张画面
+          visionMaxFrames: 48     # 画面理解最多取几帧
+          visionPack: sheet       # sheet=多帧拼一张分镜图（默认，省图省时）| frames=逐帧发
+          sheetCols: 3            # 分镜图列数（行数按帧数自动算）
 ```
 
 面板「设置」里保存的 Cookie 与本地转写配置都写在 `~/.dsh/video-credentials.json`，**优先级高于**行配置，改完立即生效。
@@ -212,8 +218,9 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 - 分析缓存不存字幕：平台字幕靠 `/resolve` 重新抓取，本地转写稿单独存在 `~/.dsh/video-transcripts/`。
 - YouTube 字幕是定时文本，标点/语气词可能有噪声；滚动字幕的重复窗口已做去重。
 - B 站字幕只有「有 Cookie + 该视频确有 AI 字幕」才拿得到，不是每个视频都有。
-- 画面文字识别：只在 macOS 可用（依赖系统 Vision 框架）；识别质量取决于画面文字是否清晰，滚动弹幕/花哨字体容易出错；抽帧间隔与帧数上限会限制长视频的覆盖密度。
-- 画面理解：需要当前（或设置里指定的）模型声明 `image` 输入能力；会把抽样画面图片发给模型（与 OCR 的本机离线不同）；每帧约 2–4 秒、按帧计费，所以默认只抽最多 48 帧并在 OCR 文字够多时跳过；画面里既没字也没可描述内容时仍会得到 `asr-empty`。
+- 按镜头抽帧时，画面文字段的「结束时间」按相邻帧间隔的中位数估算（各帧自身的秒数是准的），时间轴粗一点但不会串行；
+- 画面文字识别：只在 macOS 可用（依赖系统 Vision 框架）；识别质量取决于画面文字是否清晰，滚动弹幕/花哨字体容易出错；抽帧默认按镜头切点（找不到切点时均匀铺满），因此长视频的覆盖密度取决于镜头数量而不是固定间隔。
+- 画面理解：需要当前（或设置里指定的）模型声明 `image` 输入能力；会把拼好的分镜图发给模型（与 OCR 的本机离线不同）；默认一张图装 9–24 格，所以按「张」而不是按「帧」计费（比逐帧省很多），单次生成仍要 15–30s；画面里既没字也没可描述内容时仍会得到 `asr-empty`。
 - 本地转写：Whisper 首次加载 574MB 模型约 6–12 秒（每次调用固定成本，长视频占比可忽略）；SenseVoice 段级时间戳是按标点聚合的近似值；`threads: 0` 交给引擎自己决定（whisper.cpp 默认 4）。
 - 只支持单条链接，不做播放列表 / 合集递归。
 

@@ -9,3 +9,4 @@ node_modules/
 .video-credentials.json
 video-credentials.json
 video-history.json
+*.tgz
