@@ -558,8 +558,8 @@ const MINDMAP_VALUE = {
   mindmap: {
     title: '思维导图：用第一性原理理解 AI 编程',
     children: [
-      { title: '开场', children: [{ title: '信息密度' }, { title: '注意力经济' }] },
-      { title: '核心论点', children: [{ title: '时间成本' }, { title: '创造力' }] },
+      { title: '开场', t: 0, children: [{ title: '信息密度', t: 33 }, { title: '注意力经济' }] },
+      { title: '核心论点', t: 62, children: [{ title: '时间成本' }, { title: '创造力' }] },
     ],
   },
   source: 'llm',
@@ -941,6 +941,23 @@ tree = await settle();
 const chFrame = allByTag(tree, 'iframe')[0];
 check('点击章节发送 seek 到外壳', Boolean(chFrame) && chFrame.contentWindow.messages.some((msg) => msg && msg.seconds === 62));
 
+// 章节当前高亮（task-16）：跟随 dsh-video:time
+sandbox.dispatchEvent({ type: 'message', data: { type: 'dsh-video:time', seconds: 30 } });
+tree = await settle();
+let chCurrent = allByClass(tree, 'dvv-ch').filter((node) => node.props['data-current'] === 'true');
+check('章节高亮跟随播放（30s → 开场）', chCurrent.length === 1 && nodeText(chCurrent[0]).includes('开场'));
+sandbox.dispatchEvent({ type: 'message', data: { type: 'dsh-video:time', seconds: 70 } });
+tree = await settle();
+chCurrent = allByClass(tree, 'dvv-ch').filter((node) => node.props['data-current'] === 'true');
+check('章节高亮随播放切换（70s → 核心论点）', chCurrent.length === 1 && nodeText(chCurrent[0]).includes('核心论点'));
+sandbox.dispatchEvent({ type: 'message', data: { type: 'dsh-video:time', seconds: 0 } });
+tree = await settle();
+check('seconds=0 时章节不高亮', allByClass(tree, 'dvv-ch').filter((node) => node.props['data-current'] === 'true').length === 0);
+sandbox.dispatchEvent({ type: 'message', data: { type: 'dsh-video:time', seconds: 9999 } });
+tree = await settle();
+chCurrent = allByClass(tree, 'dvv-ch').filter((node) => node.props['data-current'] === 'true');
+check('超出末章 start 时高亮最后一章', chCurrent.length === 1 && nodeText(chCurrent[0]).includes('核心论点'));
+
 /* ---------------------------------------------------------------- 原文页 */
 
 clickText(tree, '原文');
@@ -1048,6 +1065,21 @@ clickText(tree, '全部展开');
 tree = await settle();
 checkIncludes('全部展开后显示深层节点', nodeText(tree), '信息密度');
 checkIncludes('导图显示缓存/生成信息', nodeText(tree), '当前模型');
+
+// 导图节点时间徽标（task-16）
+const mmBadges = allByClass(tree, 'dvv-mm-t');
+check('导图渲染带 t 的节点时间徽标', mmBadges.length === 3);
+checkIncludes('导图时间徽标文本 0:33', JSON.stringify(mmBadges.map(nodeText)), '0:33');
+const mmBadge33 = mmBadges.find((node) => nodeText(node) === '0:33');
+check('点击 0:33 时间徽标跳到 33 秒', Boolean(mmBadge33) && click(mmBadge33));
+tree = await settle();
+check('导图时间徽标发送 seek(33)', allByTag(tree, 'iframe')[0].contentWindow.messages.some((msg) => msg && msg.type === 'dsh-video:seek' && msg.seconds === 33));
+const mmBadge0 = allByClass(tree, 'dvv-mm-t').find((node) => nodeText(node) === '0:00');
+check('点击父节点时间徽标不折叠', Boolean(mmBadge0) && click(mmBadge0));
+tree = await settle();
+checkIncludes('点击父节点徽标后子节点仍展开', nodeText(tree), '信息密度');
+const mmNoTimeCard = findOne(tree, (node) => hasClass(node, 'dvv-mm2-node') && nodeText(node).includes('注意力经济'));
+check('无 t 的节点不渲染时间徽标', Boolean(mmNoTimeCard) && allByClass(mmNoTimeCard, 'dvv-mm-t').length === 0);
 
 /* ---------------------------------------------------------------- 分镜页 */
 

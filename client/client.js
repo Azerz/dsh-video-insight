@@ -957,14 +957,14 @@ window.__ModuleLoader__.load({
 
     /* ------------------------------------------------------------------ 章节 */
 
-    function ChapterRow({ item, index, open, onToggle, onSeek }) {
+    function ChapterRow({ item, index, open, onToggle, onSeek, current }) {
       const start = item.start !== null && item.start !== undefined && Number.isFinite(Number(item.start)) ? Number(item.start) : null;
       const timeLabel = start !== null ? `[${fmtTime(start)}]` : `P${item.pageIndex ?? index + 1}`;
       const activate = () => {
         onToggle(open ? -1 : index);
         if (start !== null) onSeek(start); // 章节时间戳同时跳转播放位置
       };
-      return h('div', { className: 'dvv-ch' }, [
+      return h('div', { className: 'dvv-ch', 'data-current': current ? 'true' : 'false' }, [
         h('div', {
           key: 'head', className: 'dvv-ch-head', role: 'button', tabIndex: 0,
           onClick: activate,
@@ -978,7 +978,7 @@ window.__ModuleLoader__.load({
       ]);
     }
 
-    function ChaptersTab({ chapters, openIndex, onToggle, onRetry, onSeek }) {
+    function ChaptersTab({ chapters, openIndex, onToggle, onRetry, onSeek, currentSeconds }) {
       if (chapters.loading) {
         return h('div', { className: 'dvv-tabpane' }, h('div', { className: 'dvv-chlist' },
           [0, 1, 2, 3].map((index) => h('div', { key: index, className: 'dvv-skel' }))));
@@ -988,9 +988,21 @@ window.__ModuleLoader__.load({
       if (chapters.error) parts.push(h('div', { key: 'err', className: 'dvv-error' }, chapters.error));
       if (chapters.note) parts.push(h('div', { key: 'note', className: 'dvv-note' }, chapters.note));
       const items = Array.isArray(chapters.items) ? chapters.items : [];
+      const seconds = Number(currentSeconds);
+      let currentIndex = -1;
+      if (Number.isFinite(seconds) && seconds > 0) {
+        let bestStart = -Infinity;
+        items.forEach((item, index) => {
+          const start = Number(item && item.start);
+          if (Number.isFinite(start) && start <= seconds && start >= bestStart) {
+            bestStart = start;
+            currentIndex = index;
+          }
+        });
+      }
       if (items.length) {
         parts.push(h('div', { key: 'list', className: 'dvv-chlist' }, items.map((item, index) => h(ChapterRow, {
-          key: `ch-${index}`, item, index, open: openIndex === index, onToggle, onSeek,
+          key: `ch-${index}`, item, index, open: openIndex === index, onToggle, onSeek, current: currentIndex === index,
         }))));
       } else {
         parts.push(h('div', { key: 'empty', className: 'dvv-notice' }, [
@@ -1336,11 +1348,14 @@ window.__ModuleLoader__.load({
           ? node.children.filter((child) => child && typeof child === 'object')
           : [];
         const width = mindmapNodeWidth(depth);
+        const tValue = node && node.t !== null && node.t !== undefined ? Number(node.t) : NaN;
+        const t = Number.isFinite(tValue) && tValue >= 0 ? tValue : null;
         const record = {
           path,
           depth,
           branch,
           title,
+          t,
           width,
           height: mindmapNodeHeight(depth, title),
           x: 0,
@@ -1414,8 +1429,14 @@ window.__ModuleLoader__.load({
     }
 
     /** 一个图形化导图节点：绝对定位卡片，点击折叠/展开子分支。 */
-    function MindGraphNode({ record, onToggle }) {
+    function MindGraphNode({ record, onToggle, onSeek }) {
       const toggle = record.hasChildren ? () => onToggle(record.path) : undefined;
+      const time = Number.isFinite(record.t) ? record.t : null;
+      const timeLabel = time === null ? '' : formatClock(time);
+      const seek = time === null || typeof onSeek !== 'function' ? null : (event) => {
+        if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+        onSeek(time);
+      };
       return h('div', {
         className: `dvv-mm2-node dvv-mm-branch-${record.branch}`,
         'data-depth': String(record.depth),
@@ -1430,6 +1451,10 @@ window.__ModuleLoader__.load({
         onClick: toggle,
       }, [
         h('span', { key: 't', className: 'dvv-mm2-title' }, record.title || '（空节点）'),
+        time === null ? null : h('button', {
+          key: 'time', type: 'button', className: 'dvv-mm-t',
+          title: `跳到 ${timeLabel} 播放`, 'aria-label': `跳到 ${timeLabel} 播放`, onClick: seek,
+        }, timeLabel),
         record.hasChildren
           ? h('span', { key: 'c', className: 'dvv-mm2-count', 'aria-hidden': 'true' }, record.open ? '▾' : '▸')
           : null,
@@ -1437,7 +1462,7 @@ window.__ModuleLoader__.load({
     }
 
     /** 思维导图页签：loading / 错误（含 no-transcript 引导）/ 横向树状图。 */
-    function MindmapTab({ doc, mindmap, expanded, onRetry, onExpandAll, onCollapseAll, onToggle, onGoTranscript }) {
+    function MindmapTab({ doc, mindmap, expanded, onRetry, onExpandAll, onCollapseAll, onToggle, onSeek, onGoTranscript }) {
       const [zoom, setZoom] = useState(1);
       const layout = mindmap.data && !mindmap.loading && !mindmap.error
         ? buildMindmapLayout(mindmap.data, expanded)
@@ -1486,7 +1511,7 @@ window.__ModuleLoader__.load({
           d: link.d,
           fill: 'none',
         })));
-        const cards = layout.nodes.map((record) => h(MindGraphNode, { key: record.path, record, onToggle }));
+        const cards = layout.nodes.map((record) => h(MindGraphNode, { key: record.path, record, onToggle, onSeek }));
         const inner = h('div', {
           key: 'inner',
           className: 'dvv-mm2-inner',
@@ -3081,7 +3106,7 @@ window.__ModuleLoader__.load({
           });
         } else if (tab === 'chapters') {
           tabBody = h(ChaptersTab, {
-            chapters, openIndex: openChapter,
+            chapters, openIndex: openChapter, currentSeconds,
             onToggle: (index) => setOpenChapter(index),
             onSeek: seekTo,
             onRetry: () => { void loadChapters(doc); },
@@ -3110,6 +3135,7 @@ window.__ModuleLoader__.load({
             onExpandAll: expandMindmapAll,
             onCollapseAll: collapseMindmapAll,
             onToggle: toggleMindmapNode,
+            onSeek: seekTo,
             onGoTranscript: () => { void runTranscribe(doc); },
           });
         } else if (tab === 'storyboard') {
@@ -3355,6 +3381,7 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-ch{border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.1));border-radius:10px;background:var(--dsw-alias-bg-layer-1,transparent);overflow:hidden}
 .dvv-ch-head{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer}
 .dvv-ch-head:hover{background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.1))}
+.dvv-ch[data-current="true"]{border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.12));box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}
 .dvv-ch-title{flex:1;min-width:0;font-size:13px;line-height:20px;font-weight:550}
 .dvv-ch-chev{flex:none;font-size:11px;color:var(--dsw-alias-label-secondary)}
 .dvv-ch-body{border-top:1px dashed var(--dsw-alias-border-l1,rgba(0,0,0,.1));padding:8px 12px;font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary)}
@@ -3479,6 +3506,8 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-mm2-node[data-depth="0"] .dvv-mm2-title{font-size:13.5px;font-weight:650}
 .dvv-mm2-node[data-depth="1"] .dvv-mm2-title{font-weight:600}
 .dvv-mm2-count{flex:none;font-size:10px;line-height:16px;color:var(--dsw-alias-label-secondary)}
+.dvv-mm-t{flex:none;margin:0;padding:0 5px;border:1px solid var(--dsw-alias-border-l2);border-radius:5px;background:var(--dsw-alias-bg-layer-1,rgba(127,127,127,.12));color:var(--dsw-alias-label-secondary);font:inherit;font-size:10px;line-height:16px;font-variant-numeric:tabular-nums;cursor:pointer}
+.dvv-mm-t:hover{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}
 /* 按一级分支分配强调色：全部从 --dsw-alias-* 派生，暗色主题自动跟随 */
 .dvv-mm-branch-0{--dvv-mm-accent:var(--dsw-alias-brand-primary)}
 .dvv-mm-branch-1{--dvv-mm-accent:color-mix(in srgb, var(--dsw-alias-brand-primary) 62%, var(--dsw-alias-state-success-primary))}
