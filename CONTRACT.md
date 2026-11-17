@@ -373,6 +373,28 @@ data: {"type":"error","code":"asr-needs-ytdlp","message":"…"}
   - 错误码：`bad-url`、`unsupported`、`ocr-needs-ytdlp`、`ocr-no-ffmpeg`、`ocr-empty`、`sheet-empty`、`sheet-failed`、`vision-*`、`aborted`、`internal`。
 - 说明：分镜不依赖字幕（无字幕/无声视频也能出图）；`describe` 会调用视觉模型（图片会离开本机），不开时纯本机处理。
 
+## 字幕双语文档（translate）
+
+把转写稿逐段翻译成中文/英文，时间轴保持不变，供面板「原文」页签做对照显示。结果按视频 + 语言缓存在 `~/.dsh/video-translations/<safeId(docId)>.<lang>.json`（0600，原子写）。
+
+- 只支持 `zh` / `en`（`lang` 其他值 → `bad-lang`）。
+- 输入是 `doc.transcript.segments`（平台字幕、本地 Whisper、OCR、画面理解都行）；没有转写稿 → `no-transcript`。
+- 分批：每批 ≤40 段且 ≤3200 字（`BATCH_SEGMENTS` / `BATCH_CHARS`）；每批让模型只输出与输入等长的 JSON 字符串数组，`parseTranslations` 取第一个 `[` 到最后一个 `]` 解析，多截少补。
+- `video.transcript` 上限 6000 段（`MAX_TRANSLATIONS`）。
+- 缓存文件形状：
+  ```json
+  { "docId": "youtube:dQw4w9WgXcQ", "lang": "zh", "langLabel": "中文", "source": "llm",
+    "model": "deepseek-v4.1-flash", "createdAt": 1794983000000, "count": 61,
+    "translations": [{"start": 18.64, "end": 22.4, "text": "♪ We're no strangers to love ♪", "translation": "♪ 我们对爱早已不陌生 ♪"}] }
+  ```
+- `GET /translate?docId=<docId>&lang=zh|en` → `{ok:true,value:<上面的对象>|null}`（`value.cached=true`）。
+- `POST /translate`（SSE）body `{docId?/url?, lang:'zh'|'en', force?}`：
+  - 帧：`{type:'phase',text}`、`{type:'progress',stage:'translate',percent}`、`{type:'done',docId,lang,langLabel,cached,count,translations}`、`{type:'error',code,message}`；
+  - 未 `force` 时命中缓存直接 `done cached:true`；
+  - 错误码：`bad-lang`、`no-transcript`、`bad-json`、`no-route`、`llm-failed`、`aborted`、`internal`。
+- `POST /translate/clear` body `{docId, lang}` → `{ok,value:{docId,lang,removed}}`。
+- 播放进度同步（「跟随播放」用）：播放器外壳页面每秒向父页面 `postMessage({type:'dsh-video:time', seconds})`（YouTube IFrame API 有 `getCurrentTime()`；B 站 iframe 跨域拿不到，不发）。面板据此把当前播放时间映射到段落并高亮，只在用户点开「原文」页签时才滚动。
+
 ## 工具（agent-facing）
 
 插件在 `ctx.inject(['tools'])` 里注册两个**全局**工具（fiber 不是 agent scope，所以任何会话——包括 qqbot 用 `ctx.agents.create()` 起的 QQ 会话——都看得见）：
