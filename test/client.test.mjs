@@ -679,13 +679,13 @@ let historyItems = [
     docId: 'bilibili:BV1xx411c7mD', url: BILI_DOC.url, platform: 'bilibili', id: 'BV1xx411c7mD',
     title: BILI_DOC.title, author: '硬核拆解', duration: 754, cover: BILI_DOC.cover,
     hasTranscript: true, hasSummary: true, hasChapters: true, hasMindmap: true, chatCount: 3,
-    analyzedAt: now - 120e3, action: 'analyze',
+    favorite: false, analyzedAt: now - 120e3, action: 'analyze',
   },
   {
     docId: 'youtube:hist1', url: 'https://www.youtube.com/watch?v=hist1', platform: 'youtube', id: 'hist1',
     title: '历史上的 YouTube 视频', author: 'Someone', duration: 213, cover: '',
     hasTranscript: false, hasSummary: false, hasChapters: false, hasMindmap: false, chatCount: 0,
-    analyzedAt: now - 3 * 3600e3, action: 'view',
+    favorite: false, analyzedAt: now - 3 * 3600e3, action: 'view',
   },
 ];
 
@@ -696,6 +696,13 @@ function resetRoutes() {
     history: () => ({ ok: true, value: { items: historyItems } }),
     'history/remove': (call) => {
       historyItems = historyItems.filter((item) => item.docId !== (call.body && call.body.docId));
+      return { ok: true, value: { items: historyItems } };
+    },
+    'history/favorite': (call) => {
+      const body = call.body || {};
+      historyItems = historyItems.map((item) => (
+        item.docId === body.docId ? { ...item, favorite: Boolean(body.favorite) } : item
+      ));
       return { ok: true, value: { items: historyItems } };
     },
     'history/clear': () => {
@@ -868,6 +875,19 @@ check('首页有「解析」按钮', Boolean(buttonByText(tree, '解析')));
 checkIncludes('未配置 Cookie 有 B 站提示', nodeText(tree), 'B 站 AI 字幕需要登录 Cookie');
 checkIncludes('首页历史列表', nodeText(tree), '最近分析');
 checkIncludes('首页历史条目标题', nodeText(tree), '用第一性原理理解 AI 编程');
+
+// 首页「最近分析」星标（task-19）
+let homeStars = allByClass(tree, 'dvv-fav');
+check('首页最近分析有星标按钮', homeStars.length === 2);
+check('首页星标默认空心', homeStars[0] && nodeText(homeStars[0]) === '☆');
+click(homeStars[0]);
+tree = await settle();
+check('首页点星标 POST 收藏参数', callsOf('history/favorite').some((call) => call.body
+  && call.body.docId === 'bilibili:BV1xx411c7mD' && call.body.favorite === true));
+checkIncludes('首页收藏成功 toast', nodeText(tree), '已收藏');
+homeStars = allByClass(tree, 'dvv-fav');
+check('首页星标变实心', homeStars[0] && homeStars[0].props['data-on'] === 'true' && nodeText(homeStars[0]) === '★');
+checkIncludes('首页最近分析显示上限提示', nodeText(tree), '最多保留 100 条');
 check('挂载时拉取 status/history/asr', callsOf('status').length === 1 && callsOf('history').length >= 1 && callsOf('asr/status').length === 1);
 check('侧栏图标为 16x16 播放三角', (() => {
   const icon = sidebar.component({ size: 16, active: false });
@@ -1262,6 +1282,66 @@ checkIncludes('历史徽标：总结', nodeText(tree), '总结');
 checkIncludes('历史徽标：导图', nodeText(tree), '导图');
 checkIncludes('历史徽标：对话条数', nodeText(tree), '3 条对话');
 checkIncludes('历史相对时间', nodeText(tree), '分钟前');
+checkIncludes('历史抽屉显示上限 100', nodeText(tree), '最多保留 100 条');
+
+// 搜索框：标题 / 作者 / 无匹配（task-19）
+let histSearch = inputByLabel(tree, '搜索历史记录');
+check('历史抽屉有搜索框', Boolean(histSearch));
+change(histSearch, 'youtube');
+tree = await settle();
+checkIncludes('搜索按标题过滤', nodeText(tree), '历史上的 YouTube 视频');
+checkIncludes('搜索后条数为 1 / 2', nodeText(tree), '1 / 2');
+change(inputByLabel(tree, '搜索历史记录'), '硬核拆解');
+tree = await settle();
+check('按作者搜索只剩 1 条', allByClass(tree, 'dvv-hist').length === 1);
+change(inputByLabel(tree, '搜索历史记录'), 'zzz-no-match');
+tree = await settle();
+checkIncludes('无匹配历史提示', nodeText(tree), '没有匹配的历史记录');
+
+// 清空搜索后切「已收藏」（BILI 已在首页被收藏）
+change(inputByLabel(tree, '搜索历史记录'), '');
+tree = await settle();
+clickText(tree, '已收藏');
+tree = await settle();
+check('已收藏筛选只剩 1 条', allByClass(tree, 'dvv-hist').length === 1);
+checkIncludes('已收藏筛选条数', nodeText(tree), '1 / 2');
+clickText(tree, '全部');
+tree = await settle();
+check('全部筛选恢复 2 条', allByClass(tree, 'dvv-hist').length === 2);
+
+// 抽屉星标切换：取消收藏 → 再收藏
+const drawerStar = allByClass(tree, 'dvv-fav')[0];
+check('历史行有星标按钮', Boolean(drawerStar) && nodeText(drawerStar) === '★');
+click(drawerStar);
+tree = await settle();
+check('取消收藏 POST favorite=false', callsOf('history/favorite').some((call) => call.body
+  && call.body.docId === 'bilibili:BV1xx411c7mD' && call.body.favorite === false));
+checkIncludes('取消收藏 toast', nodeText(tree), '已取消收藏');
+const drawerStar2 = allByClass(tree, 'dvv-fav')[0];
+check('星标变回空心', drawerStar2 && drawerStar2.props['data-on'] === 'false' && nodeText(drawerStar2) === '☆');
+click(drawerStar2);
+tree = await settle();
+check('再次收藏 POST favorite=true', callsOf('history/favorite').filter((call) => call.body
+  && call.body.favorite === true).length >= 2);
+
+// 搜索/筛选状态在关闭后保留
+change(inputByLabel(tree, '搜索历史记录'), '硬核');
+tree = await settle();
+clickText(tree, '已收藏');
+tree = await settle();
+clickText(tree, '关闭');
+tree = await settle();
+clickText(tree, '历史');
+tree = await settle();
+const persistedSearch = inputByLabel(tree, '搜索历史记录');
+check('抽屉重开后保留搜索词', Boolean(persistedSearch) && String(persistedSearch.props.value) === '硬核');
+checkIncludes('抽屉重开后保留已收藏筛选', nodeText(tree), '1 / 2');
+const favFilterBtn = allByClass(tree, 'dvv-btn-mini').find((node) => nodeText(node) === '已收藏');
+check('已收藏筛选按钮保持 active', Boolean(favFilterBtn) && favFilterBtn.props['data-active'] === 'true');
+change(inputByLabel(tree, '搜索历史记录'), '');
+tree = await settle();
+clickText(tree, '全部');
+tree = await settle();
 const delBtn = allByClass(tree, 'dvv-del')[0];
 check('历史行有删除按钮', Boolean(delBtn));
 click(delBtn);
@@ -1465,11 +1545,38 @@ tree = await settle();
 checkIncludes('错误显示中文横幅', nodeText(tree), '没认出这个链接');
 
 // 返回按钮：先回插件首页，再回上层
+// 先重新解析一个视频（bad-url 失败后停在首页），确保返回走 resetToHome 而不是回上层
+let backInput = byClass(tree, 'dvv-home-input');
+change(backInput, BILI_DOC.url);
+tree = await settle();
+backInput = byClass(tree, 'dvv-home-input');
+keydown(backInput, 'Enter');
+tree = await settle();
+check('重新解析后回到视频视图', Boolean(byClass(tree, 'dvv-body') && byClass(tree, 'dvv-col-left')));
+const seedItem = {
+  docId: 'bilibili:extra0', url: 'https://www.bilibili.com/video/BVextra0', platform: 'bilibili',
+  id: 'extra0', title: '额外记录 0', author: '测试作者', duration: 60, cover: '',
+  hasTranscript: true, hasSummary: false, hasChapters: false, hasMindmap: false, chatCount: 0,
+  favorite: false, analyzedAt: now - 60e3, action: 'analyze',
+};
+historyItems = Array.from({ length: 12 }, (_, index) => ({
+  ...seedItem, docId: `bilibili:extra${index}`, id: `extra${index}`, title: `额外记录 ${index}`,
+}));
 tree = await settle();
 const backBtn = buttonByText(tree, '返回');
 click(backBtn);
 tree = await settle();
 check('返回按钮回到插件首页', Boolean(byClass(tree, 'dvv-home')));
+
+// 首页最多展示 10 条 + 「打开历史查看全部」
+tree = await settle();
+check('首页最近分析只显示前 10 条', allByClass(tree, 'dvv-hist').length === 10);
+checkIncludes('首页显示打开历史查看全部', nodeText(tree), '打开历史查看全部');
+clickText(tree, '打开历史查看全部');
+tree = await settle();
+checkIncludes('查看全部打开抽屉', nodeText(tree), '历史记录 · 12');
+clickText(tree, '关闭');
+tree = await settle();
 const backBtn2 = buttonByText(tree, '返回');
 check('首页仍有返回按钮', Boolean(backBtn2));
 click(backBtn2);
