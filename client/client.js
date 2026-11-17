@@ -41,11 +41,10 @@ window.__ModuleLoader__.load({
     const VISION_MODEL_PLACEHOLDER = 'opencode-go/deepseek-v4.1-flash';
     /** 分镜：host 生成的分镜拼图（GET 读缓存 / POST SSE 生成），格子带秒数可 seek。 */
     const EMPTY_STORYBOARD = { data: null, loading: false, phase: '', percent: null, error: '', code: '' };
-    const EMPTY_KEYFRAMES = { docId: '', loading: false, loaded: false, error: '', code: '', items: [] };
-    const KEYFRAME_COUNT = 16;
-    const KEYFRAME_INITIAL = 4;
-    const KEYFRAME_STEP_MS = 120;
-    const EMPTY_BOOKMARKS = { loading: false, loaded: false, error: '', items: [] };
+    /** 大纲：host 按「思维导图一级节点 → 章节 → 均匀切分」给出，章节与关键画面共用同一份数据与画面描述缓存。 */
+    const EMPTY_OUTLINE = { docId: '', loading: false, loaded: false, error: '', code: '', data: null, genLoading: false, genPhase: '', genPercent: null, genError: '' };
+    const OUTLINE_SOURCE_LABEL = { mindmap: '按思维导图切分', chapters: '按视频章节切分', uniform: '按时长均匀切分' };
+    const OUTLINE_STAGE_LABEL = { download: '正在准备视频…', scan: '正在抽取画面…', frames: '正在抽取画面…', describe: '正在生成画面描述…', vision: '正在理解画面…', translate: '正在整理描述…' };
     const STORYBOARD_STAGE_LABEL = { download: '正在下载视频…', scan: '正在扫描镜头…', frames: '正在抽取画面…' };
 
     /** 原文双语对照：host 按视频缓存翻译结果（GET 读缓存 / POST SSE 生成）。 */
@@ -70,7 +69,7 @@ window.__ModuleLoader__.load({
       zh: '中文', 'zh-cn': '中文', 'zh-hans': '中文', 'zh-tw': '繁體中文', 'zh-hant': '繁體中文',
       en: 'English', 'en-us': 'English', 'en-gb': 'English', ja: '日本語', ko: '한국어',
     };
-    const TABS = [['summary', '总结'], ['chapters', '章节'], ['transcript', '原文'], ['bookmarks', '片段'], ['storyboard', '分镜'], ['keyframes', '关键画面'], ['mindmap', '思维导图']];
+    const TABS = [['summary', '总结'], ['chapters', '章节'], ['transcript', '原文'], ['storyboard', '分镜'], ['mindmap', '思维导图']];
     const ASK_EXAMPLES = ['这个视频最核心的论点是什么？', '作者的观点有哪些可疑之处？', '用 5 句话讲给完全不懂的人听'];
 
     function platformMeta(platform) {
@@ -328,11 +327,21 @@ window.__ModuleLoader__.load({
      * 章节缩略图地址：Host 按 docId + 秒数截图（320×180 等比，w=160 返回 64×36 档）。
      * 只有解析缓存里存在的 docId 才有图，未命中直接 404；客户端按需懒加载，绝不一次请求全部。
      */
-    function chapterThumbSrc(doc, start) {
+    function chapterThumbSrc(doc, start, width) {
       if (!doc) return null;
       const seconds = Math.max(0, Math.floor(Number(start) || 0));
-      const path = `/dsh-video/api/thumb?docId=${encodeURIComponent(String(doc.docId || ''))}&seconds=${seconds}&w=160`;
+      const size = Number(width) === 320 ? 320 : 160;
+      const path = `/dsh-video/api/thumb?docId=${encodeURIComponent(String(doc.docId || ''))}&seconds=${seconds}&w=${size}`;
       return `${playerHostBase()}${path}`;
+    }
+
+    /** 大纲接口错误：code → 用户能看懂的中文。 */
+    function friendlyOutlineError(error) {
+      const code = String((error && error.code) || ''), message = String((error && error.message) || error || '');
+      if (code === 'not-found' || /not-found|not found|没有|找不到/i.test(message)) return '还没有这个视频的大纲：先重新解析一次视频，再来看章节和关键画面。';
+      if (code === 'no-transcript') return '这个视频还没有字幕：先在「原文」里开启本地转写，生成字幕后就能切分大纲。';
+      if (code === 'no-route' || code === 'llm-failed') return `生成画面描述失败：${message || '当前模型不可用'}，可以稍后重试。`;
+      return `大纲加载失败：${message || '未知错误'}`;
     }
 
     function readPlayerCollapsed() {
@@ -974,81 +983,93 @@ window.__ModuleLoader__.load({
 
     /* ------------------------------------------------------------------ 章节 */
 
-    function ChapterRow({ item, index, open, onToggle, onSeek, current, thumbSrc }) {
-      const start = item.start !== null && item.start !== undefined && Number.isFinite(Number(item.start)) ? Number(item.start) : null;
-      const timeLabel = start !== null ? `[${fmtTime(start)}]` : `P${item.pageIndex ?? index + 1}`;
+    function ChapterRow({ item, index, current, onSeek, doc }) {
+      const rawStart = item.start !== null && item.start !== undefined ? item.start : item.seconds;
+      const start = rawStart !== null && rawStart !== undefined && Number.isFinite(Number(rawStart)) ? Number(rawStart) : null;
       const [thumbBroken, setThumbBroken] = useState(false);
-      const activate = () => {
-        onToggle(open ? -1 : index);
-        if (start !== null) onSeek(start); // 章节时间戳同时跳转播放位置
-      };
-      // 分 P 章节（start=null）没有缩略图；加载失败时隐藏 img，只留占位底色，不显示破图标。
-      const thumb = start !== null && thumbSrc
-        ? h('span', { key: 'thumb', className: 'dvv-ch-thumb' },
-            thumbBroken ? null : h('img', {
-              key: 'img', className: 'dvv-ch-thumb-img', src: thumbSrc, alt: '',
-              width: 64, height: 36, loading: 'lazy', decoding: 'async',
-              onError: () => setThumbBroken(true),
-              onClick: (event) => {
-                if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-                activate();
-              },
-            }))
-        : null;
-      return h('div', { className: 'dvv-ch', 'data-current': current ? 'true' : 'false' }, [
-        h('div', {
-          key: 'head', className: 'dvv-ch-head', role: 'button', tabIndex: 0,
-          onClick: activate,
-          onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } },
-        }, [
-          thumb,
-          h('span', { key: 't', className: 'dvv-ts' }, timeLabel),
-          h('span', { key: 'title', className: 'dvv-ch-title' }, item.title || '(未命名章节)'),
-          h('span', { key: 'chev', className: 'dvv-ch-chev' }, open ? '▴' : '▾'),
-        ]),
-        open ? h('div', { key: 'body', className: 'dvv-ch-body' }, item.gist || '暂无这节的说明。') : null,
+      const detail = Array.isArray(item.detail) ? item.detail.filter(Boolean) : [];
+      const activate = () => { if (start !== null) onSeek(start); };
+      const thumb = start !== null && doc && !thumbBroken
+        ? h('span', { key: 'thumb', className: 'dvv-ch-thumb' }, h('img', {
+            key: 'i', className: 'dvv-ch-thumb-img', src: chapterThumbSrc(doc, start, 160), alt: '',
+            width: 96, height: 54, loading: 'lazy', decoding: 'async', onError: () => setThumbBroken(true),
+          }))
+        : h('span', { key: 'thumb', className: 'dvv-ch-thumb' });
+      return h('div', {
+        key: `ch-${index}`, className: 'dvv-ch', 'data-current': current ? 'true' : 'false',
+        role: 'button', tabIndex: 0, title: start !== null ? `跳到 ${formatClock(start)} 播放` : '',
+        onClick: activate,
+        onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } },
+      }, [
+        thumb,
+        h('div', { key: 'main', className: 'dvv-ch-main' }, [
+          h('div', { key: 'top', className: 'dvv-ch-top' }, [
+            h('span', { key: 'ts', className: 'dvv-ts' }, start !== null ? `[${fmtTime(start)}]` : `P${index + 1}`),
+            h('span', { key: 'title', className: 'dvv-ch-title' }, item.title || '(未命名章节)'),
+          ]),
+          detail.length ? h('div', { key: 'gist', className: 'dvv-ch-gist' }, detail[0]) : null,
+          item.description ? h('div', { key: 'desc', className: 'dvv-ch-desc', title: item.description }, item.description) : null,
+        ].filter(Boolean)),
       ]);
     }
 
-    function ChaptersTab({ chapters, openIndex, onToggle, onRetry, onSeek, currentSeconds, doc, thumbLimit }) {
-      if (chapters.loading) {
+    function ChaptersTab({ outline, doc, currentSeconds, view, onView, onSeek, onRetry, onGenerate, onCancel }) {
+      if (!doc) return h('div', { className: 'dvv-tabpane' }, h('div', { className: 'dvv-empty-note' }, '先解析一个视频，再来看章节。'));
+      if (outline.loading) {
         return h('div', { className: 'dvv-tabpane' }, h('div', { className: 'dvv-chlist' },
           [0, 1, 2, 3].map((index) => h('div', { key: index, className: 'dvv-skel' }))));
       }
-      const parts = [];
-      if (chapters.cachedAt) parts.push(h('div', { key: 'cached', className: 'dvv-cache-note dvv-note' }, `已缓存 · ${fmtRelative(chapters.cachedAt)}`));
-      if (chapters.error) parts.push(h('div', { key: 'err', className: 'dvv-error' }, chapters.error));
-      if (chapters.note) parts.push(h('div', { key: 'note', className: 'dvv-note' }, chapters.note));
-      const items = Array.isArray(chapters.items) ? chapters.items : [];
+      const data = outline.data && typeof outline.data === 'object' ? outline.data : {};
+      const items = Array.isArray(data.items) ? data.items.filter(Boolean) : [];
+      const visuals = data.visuals && data.visuals.generatedAt ? data.visuals : null;
       const seconds = Number(currentSeconds);
       let currentIndex = -1;
       if (Number.isFinite(seconds) && seconds > 0) {
         let bestStart = -Infinity;
-        items.forEach((item, index) => {
-          const start = Number(item && item.start);
-          if (Number.isFinite(start) && start <= seconds && start >= bestStart) {
-            bestStart = start;
-            currentIndex = index;
-          }
+        items.forEach((item, idx) => {
+          const value = Number(item && item.seconds);
+          if (Number.isFinite(value) && value <= seconds && value >= bestStart) { bestStart = value; currentIndex = idx; }
         });
       }
-      const thumbOf = (item, index) => {
-        if (!doc || index >= thumbLimit) return null; // 只给已排到号的章节挂 src（懒加载节流）
-        const start = Number(item && item.start);
-        return Number.isFinite(start) ? chapterThumbSrc(doc, start) : null;
-      };
-      if (items.length) {
-        parts.push(h('div', { key: 'list', className: 'dvv-chlist' }, items.map((item, index) => h(ChapterRow, {
-          key: `ch-${index}`, item, index, open: openIndex === index, onToggle, onSeek, current: currentIndex === index,
-          thumbSrc: thumbOf(item, index),
-        }))));
-      } else {
-        parts.push(h('div', { key: 'empty', className: 'dvv-notice' }, [
-          h('div', { key: 't', className: 'dvv-notice-title' }, '没有拿到章节'),
-          h('div', { key: 'd', className: 'dvv-note' }, '这个视频可能太短，或者字幕内容不足以切分章节。'),
+      const bar = h('div', { key: 'bar', className: 'dvv-ol-bar' }, [
+        h('span', { key: 'src', className: 'dvv-badge' }, OUTLINE_SOURCE_LABEL[data.source] || OUTLINE_SOURCE_LABEL.uniform),
+        visuals ? h('span', { key: 'cached', className: 'dvv-mini' }, `已缓存 · ${fmtRelative(visuals.generatedAt)}`) : null,
+        h('span', { key: 'view', className: 'dvv-ch-view' }, [
+          h('button', { key: 'list', type: 'button', className: 'dvv-btn', 'data-active': view !== 'grid' ? 'true' : 'false', onClick: () => onView('list') }, '列表'),
+          h('button', { key: 'grid', type: 'button', className: 'dvv-btn', 'data-active': view === 'grid' ? 'true' : 'false', onClick: () => onView('grid') }, '网格'),
+        ]),
+        h('span', { key: 'sp', className: 'dvv-spacer' }),
+        items.length ? h('span', { key: 'n', className: 'dvv-mini' }, `${items.length} 节`) : null,
+        h('button', { key: 'gen', type: 'button', className: 'dvv-btn', disabled: outline.genLoading, onClick: onGenerate },
+          outline.genLoading ? '生成中…' : visuals ? '重新生成描述' : '生成画面描述'),
+      ].filter(Boolean));
+      const parts = [bar];
+      if (outline.genLoading) {
+        parts.push(h('div', { key: 'load', className: 'dvv-tr-progress' }, [
+          h('span', { key: 'p', className: 'dvv-note' }, outline.genPhase || '正在生成画面描述…'),
+          h(AsrProgress, { key: 'g', percent: outline.genPercent }),
+          h('button', { key: 'c', type: 'button', className: 'dvv-btn', onClick: onCancel }, '取消'),
         ]));
       }
-      parts.push(h('div', { key: 'act', className: 'dvv-actions' }, h('button', { type: 'button', className: 'dvv-btn', onClick: onRetry }, '重新生成章节')));
+      if (outline.genError) parts.push(h('div', { key: 'gerr', className: 'dvv-error' }, outline.genError));
+      if (outline.error) parts.push(h('div', { key: 'err', className: 'dvv-error' }, [
+        h('span', { key: 'm' }, outline.error),
+        h('button', { key: 'r', type: 'button', className: 'dvv-btn', onClick: onRetry }, '重试'),
+      ]));
+      if (items.length) {
+        if (view === 'grid') {
+          parts.push(h('div', { key: 'grid', className: 'dvv-kf-grid' }, items.map((item, index) => h(KeyframeCard, { key: `card-${index}`, doc, item, onSeek }))));
+        } else {
+          parts.push(h('div', { key: 'list', className: 'dvv-chlist' }, items.map((item, index) => h(ChapterRow, {
+            key: `ch-${index}`, item, index, current: currentIndex === index, onSeek, doc,
+          }))));
+        }
+      } else if (!outline.loading && !outline.error) {
+        parts.push(h('div', { key: 'empty', className: 'dvv-notice' }, [
+          h('div', { key: 't', className: 'dvv-notice-title' }, '还没有可用的章节'),
+          h('div', { key: 'd', className: 'dvv-note' }, '这个视频可能太短，或者还没有字幕可以切分。'),
+        ]));
+      }
       return h('div', { className: 'dvv-tabpane' }, parts);
     }
 
@@ -1142,11 +1163,6 @@ window.__ModuleLoader__.load({
         !segments.length ? h('div', { key: 'empty', className: 'dvv-note' }, '这个视频的字幕是空的。') : null,
         segments.length && !entries.length ? h('div', { key: 'nomatch', className: 'dvv-note' }, '没有匹配的字幕。') : null,
         h('div', { key: 'list', className: 'dvv-segs' }, shown.map((entry) => {
-          const saved = bookmarkFor(props.bookmarkMap, entry.segment.start);
-          const toggle = (event) => {
-            if (event) { if (typeof event.preventDefault === 'function') event.preventDefault(); if (typeof event.stopPropagation === 'function') event.stopPropagation(); }
-            if (typeof props.onToggleBookmark === 'function') props.onToggleBookmark(entry.segment);
-          };
           return h('button', {
             key: `seg-${entry.index}`, type: 'button', className: 'dvv-seg',
             'data-tr': translateOn ? 'true' : undefined,
@@ -1161,7 +1177,6 @@ window.__ModuleLoader__.load({
             h('span', { key: 't', className: 'dvv-seg-time' }, `[${fmtTime(entry.segment.start)}]`),
             h('span', { key: 'x', className: 'dvv-seg-text' }, entry.segment.text),
             entry.translation ? h('span', { key: 'tr', className: 'dvv-tr-text' }, entry.translation) : null,
-            h('span', { key: 'bm', className: 'dvv-seg-bm', role: 'button', tabIndex: 0, 'data-on': saved ? 'true' : 'false', title: saved ? '已收藏，再点会提示重复收藏' : '收藏这一段', onClick: toggle, onKeyDown: (event) => { if (event && (event.key === 'Enter' || event.key === ' ')) toggle(event); } }, saved ? '★' : '☆'),
           ].filter(Boolean));
         })),
         entries.length > SEGMENT_LIMIT && !showAll
@@ -1169,81 +1184,6 @@ window.__ModuleLoader__.load({
           : null,
       ].filter(Boolean);
       return h('div', { className: 'dvv-tabpane' }, parts);
-    }
-
-    /* -------------------------------------------------------------- 片段收藏 */
-    /** /bookmarks 的 items → [{ item, start, end }]（start 合法的条目）。 */
-    function buildBookmarkMap(items) {
-      return (Array.isArray(items) ? items : []).map((item) => ({ item, start: Number(item && item.start), end: Number(item && item.end) })).filter((entry) => Number.isFinite(entry.start));
-    }
-    /** 字幕行对应的收藏条目（start ±1.5s 容错 host 取整）。 */
-    function bookmarkFor(map, start) {
-      const target = Number(start);
-      const hit = Number.isFinite(target) ? (Array.isArray(map) ? map : []).find((entry) => Math.abs(entry.start - target) <= 1.5) : null;
-      return hit ? hit.item : null;
-    }
-    /** 时间范围文案：`0:08–0:12`（缺 end 时只显示起点）。 */
-    function bookmarkClock(item) {
-      const start = Number(item && item.start), end = Number(item && item.end);
-      const head = Number.isFinite(start) ? formatClock(start) : '--:--';
-      return Number.isFinite(start) && Number.isFinite(end) && end > start ? `${head}–${formatClock(end)}` : head;
-    }
-    /** 复制片段用的纯文本：`标签 0:08–0:12 正文`。 */
-    function bookmarkCopyText(item) {
-      const label = item && item.label ? `${String(item.label).trim()} ` : '';
-      return `${label}${bookmarkClock(item)} ${String((item && item.text) || '').trim()}`.trim();
-    }
-    /** 收藏接口错误：code → 用户能看懂的中文。 */
-    function friendlyBookmarkError(error, action) {
-      const code = String((error && error.code) || '');
-      const message = String((error && error.message) || error || '未知错误'), verb = action || '收藏';
-      if (code === 'bad-url') return '这个视频的链接不完整，重新粘贴链接解析后再试。';
-      if (code === 'not-found' || code === 'no-doc') return '没有找到这个视频，重新解析一次再收藏。';
-      if (code === 'bad-json') return `${verb}失败：请求格式不对，请重试一次。`;
-      return `${verb}失败：${message}`;
-    }
-    /** 片段页签：时间跳转 / 复制 / 删除 / 清空二次确认。 */
-    function BookmarksTab({ bookmarks, onSeek, onCopy, onRemove, onClear, onRetry }) {
-      const [confirming, setConfirming] = useState(false);
-      const state = bookmarks || EMPTY_BOOKMARKS;
-      const items = (Array.isArray(state.items) ? state.items : []).slice().sort((a, b) => Number(a.start) - Number(b.start));
-      useEffect(() => { setConfirming(false); }, [items.length]);
-      if (state.loading) {
-        return h('div', { className: 'dvv-tabpane dvv-loading-block' }, [h('span', { key: 's', className: 'dvv-spinner' }), h('span', { key: 't' }, '正在读取收藏…')]);
-      }
-      const clearLabel = confirming ? '确认清空？' : '清空';
-      const parts = [h('div', { key: 'bar', className: 'dvv-bm-bar' }, [
-        h('span', { key: 't', className: 'dvv-bm-bar-title' }, '片段'),
-        h('span', { key: 'c', className: 'dvv-note' }, `${items.length} 条`),
-        h('div', { key: 's', className: 'dvv-spacer' }),
-        h('button', { key: 'clear', type: 'button', className: 'dvv-btn', disabled: !items.length, onClick: () => { if (confirming) { setConfirming(false); if (onClear) onClear(); } else setConfirming(true); } }, clearLabel),
-        confirming ? h('button', { key: 'x', type: 'button', className: 'dvv-btn', onClick: () => setConfirming(false) }, '取消') : null,
-      ].filter(Boolean))];
-      if (state.error) {
-        parts.push(h('div', { key: 'e', className: 'dvv-error' }, [
-          h('span', { key: 'm' }, state.error),
-          typeof onRetry === 'function' ? h('button', { key: 'r', type: 'button', className: 'dvv-btn', onClick: () => onRetry() }, '重试') : null,
-        ].filter(Boolean)));
-      }
-      if (!items.length) {
-        parts.push(h('div', { key: 'empty', className: 'dvv-notice' }, [
-          h('div', { key: 't', className: 'dvv-notice-title' }, '还没有收藏的片段'),
-          h('div', { key: 'd', className: 'dvv-note' }, '在「原文」里点每行右边的 ☆ 就能收进来。'),
-        ]));
-      } else {
-        parts.push(h('div', { key: 'list', className: 'dvv-bm-list' }, items.map((item, index) => h('div', { key: item.id || index, className: 'dvv-bm-row' }, [
-          h('button', { key: 'time', type: 'button', className: 'dvv-bm-time', title: `跳到 ${formatClock(item.start)} 播放`, onClick: () => { const start = Number(item.start); if (Number.isFinite(start) && onSeek) onSeek(start); } }, bookmarkClock(item)),
-          h('div', { key: 'body', className: 'dvv-bm-body' }, [
-            item.label ? h('div', { key: 'l', className: 'dvv-bm-label' }, String(item.label)) : null,
-            h('div', { key: 'x', className: 'dvv-bm-text', title: item.text || '' }, item.text || ''),
-          ].filter(Boolean)),
-          h('div', { key: 'act', className: 'dvv-actions dvv-bm-actions' }, [
-            h('button', { key: 'c', type: 'button', className: 'dvv-btn', onClick: () => { if (onCopy) onCopy(item); } }, '复制'),
-            h('button', { key: 'd', type: 'button', className: 'dvv-btn', 'data-danger': 'true', onClick: () => { if (onRemove) onRemove(item); } }, '删除'),
-          ]),
-        ]))));
-      }
-      return h('div', { className: 'dvv-tabpane dvv-bm' }, parts);
     }
 
     /* -------------------------------------------------------------- 追问对话框 */
@@ -1757,31 +1697,26 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'dvv-tabpane dvv-sb-tab' }, [toolbar, body].filter(Boolean));
     }
 
-    /* ---- 关键画面（第 6 步）---- */
-    function keyframeThumbSrc(doc, seconds) { return doc ? `${playerHostBase()}/dsh-video/api/thumb?docId=${encodeURIComponent(String(doc.docId || ''))}&seconds=${Math.max(0, Math.floor(Number(seconds) || 0))}&w=320` : null; }
-    function friendlyKeyframesError(error) {
-      const code = String((error && error.code) || ''), message = String((error && error.message) || error || '');
-      if (code === 'not-found' || /not-found|not found|没有|找不到/i.test(message)) return '还没有这个视频的关键画面：先重新解析一次视频，再来看关键画面。';
-      return `整理关键画面失败：${message || '未知错误'}`;
-    }
+    /* ---- 关键画面（同一份大纲的卡片网格）---- */
     function KeyframeCard({ doc, item, onSeek }) {
       const [broken, setBroken] = useState(false);
-      const seconds = Math.max(0, Math.floor(Number(item && item.seconds) || 0)), label = String((item && item.label) || ''), clock = formatClock(seconds);
-      return h('button', { type: 'button', className: 'dvv-kf-card', 'data-seconds': String(seconds), title: label ? `${label} · ${clock}` : `跳到 ${clock}`, onClick: () => onSeek(seconds) }, [
-        h('div', { key: 't', className: 'dvv-kf-thumb' }, [broken ? h('div', { key: 'p', className: 'dvv-kf-ph', 'aria-hidden': 'true' }) : h('img', { key: 'i', className: 'dvv-kf-img', src: keyframeThumbSrc(doc, seconds), alt: label || clock, loading: 'lazy', onError: () => setBroken(true) }), h('span', { key: 'c', className: 'dvv-kf-time' }, clock)]),
-        label ? h('div', { key: 'l', className: 'dvv-kf-label', title: label }, label) : null,
-      ].filter(Boolean));
-    }
-    function KeyframesTab({ doc, keyframes, shown, onSeek, onOpenStoryboard, onRetry }) {
-      if (!doc) return h('div', { className: 'dvv-tabpane dvv-kf-tab' }, h('div', { className: 'dvv-empty-note' }, '先解析一个视频，再来看它的关键画面。'));
-      const items = Array.isArray(keyframes.items) ? keyframes.items : [], visible = items.slice(0, Math.max(0, Math.min(Number(shown) || 0, items.length)));
-      const bar = h('div', { key: 'bar', className: 'dvv-kf-bar' }, [h('span', { key: 't', className: 'dvv-label' }, '关键画面'), items.length ? h('span', { key: 'c', className: 'dvv-mini' }, `${items.length} 张`) : null, h('span', { key: 's', className: 'dvv-spacer' }), onOpenStoryboard ? h('button', { key: 'sb', type: 'button', className: 'dvv-btn dvv-link-btn', onClick: onOpenStoryboard }, '看完整分镜') : null].filter(Boolean));
-      const body = keyframes.loading
-        ? h('div', { key: 'l', className: 'dvv-loading-block' }, [h('span', { key: 's', className: 'dvv-spinner' }), '正在整理关键画面…'])
-        : keyframes.error ? h('div', { key: 'e', className: 'dvv-error' }, [h('span', { key: 't' }, keyframes.error), h('button', { key: 'r', type: 'button', className: 'dvv-btn', onClick: onRetry }, '重试')])
-        : items.length ? h('div', { key: 'g', className: 'dvv-kf-grid' }, visible.map((item, index) => h(KeyframeCard, { key: `${item.seconds}-${index}`, doc, item, onSeek })))
-        : h('div', { key: 'n', className: 'dvv-empty-note' }, '这个视频没有可用的关键画面。');
-      return h('div', { className: 'dvv-tabpane dvv-kf-tab' }, [bar, body]);
+      const seconds = Math.max(0, Math.floor(Number(item && item.seconds) || 0));
+      const title = String((item && item.title) || ''), description = String((item && item.description) || '');
+      return h('button', {
+        type: 'button', className: 'dvv-kf-card', 'data-seconds': String(seconds),
+        title: title ? `${title} · ${formatClock(seconds)}` : `跳到 ${formatClock(seconds)}`,
+        onClick: () => onSeek(seconds),
+      }, [
+        h('div', { key: 'thumb', className: 'dvv-kf-thumb' }, [
+          broken ? h('div', { key: 'ph', className: 'dvv-kf-ph', 'aria-hidden': 'true' })
+            : h('img', { key: 'img', className: 'dvv-kf-img', src: chapterThumbSrc(doc, seconds, 320), alt: title || formatClock(seconds), loading: 'lazy', onError: () => setBroken(true) }),
+          h('span', { key: 'time', className: 'dvv-kf-time' }, formatClock(seconds)),
+        ]),
+        h('div', { key: 'body', className: 'dvv-kf-body' }, [
+          h('div', { key: 'title', className: 'dvv-kf-title', title }, title || '关键画面'),
+          h('div', { key: 'desc', className: 'dvv-kf-desc', 'data-empty': description ? undefined : 'true' }, description || '还没有描述'),
+        ]),
+      ]);
     }
 
     /* ---------------------------------------------------------- 历史列表 / 抽屉 */    /* ---------------------------------------------------------- 历史列表 / 抽屉 */
@@ -2227,8 +2162,6 @@ window.__ModuleLoader__.load({
       const [tab, setTab] = useState('summary');
       const [summary, setSummary] = useState(EMPTY_SUMMARY);
       const [chapters, setChapters] = useState(EMPTY_CHAPTERS);
-      const [openChapter, setOpenChapter] = useState(-1);
-      const [thumbLimit, setThumbLimit] = useState(0);
       const [segQuery, setSegQuery] = useState('');
       const [segAll, setSegAll] = useState(false);
       const [translateOn, setTranslateOn] = useState(false);
@@ -2258,8 +2191,8 @@ window.__ModuleLoader__.load({
       const [mmExpanded, setMmExpanded] = useState({});
       const [storyboard, setStoryboard] = useState(EMPTY_STORYBOARD);
       const [sbDescribe, setSbDescribe] = useState(false);
-      const [keyframes, setKeyframes] = useState(EMPTY_KEYFRAMES), [kfShown, setKfShown] = useState(0);
-      const [bookmarks, setBookmarks] = useState(EMPTY_BOOKMARKS);
+      const [outline, setOutline] = useState(EMPTY_OUTLINE);
+      const [outlineView, setOutlineView] = useState('list');
 
       const mounted = useRef(true);
       /** 同一时刻只允许一条在途请求（解析或流式），切视频 / 新请求前 abort。 */
@@ -2530,8 +2463,6 @@ window.__ModuleLoader__.load({
         translationAbort.current = null;
         setSummary(EMPTY_SUMMARY);
         setChapters(EMPTY_CHAPTERS);
-        setOpenChapter(-1);
-        setThumbLimit(0);
         setSegQuery('');
         setSegAll(false);
         setTranslateOn(false);
@@ -2545,8 +2476,8 @@ window.__ModuleLoader__.load({
         setTranscribe(EMPTY_TRANSCRIBE);
         setStoryboard(EMPTY_STORYBOARD);
         setSbDescribe(false);
-        setKeyframes(EMPTY_KEYFRAMES); setKfShown(0);
-        setBookmarks(EMPTY_BOOKMARKS);
+        setOutline(EMPTY_OUTLINE);
+        setOutlineView('list');
       }, []);
 
       /** 把 host 返回的 doc.analysis 回填到面板状态（summary / chapters / mindmap / chat）。 */
@@ -2573,7 +2504,6 @@ window.__ModuleLoader__.load({
             source: cache.chapters.source || 'cache',
             cachedAt: cache.chapters.generatedAt || savedAt,
           });
-          setOpenChapter(-1);
         }
         if (cache.mindmap) {
           setMindmap({
@@ -2600,7 +2530,6 @@ window.__ModuleLoader__.load({
           if (!mounted.current) return;
           setSummary(EMPTY_SUMMARY);
           setChapters(EMPTY_CHAPTERS);
-          setOpenChapter(-1);
           setMindmap(EMPTY_MINDMAP);
           setMmExpanded({});
           setChat([]);
@@ -2685,48 +2614,75 @@ window.__ModuleLoader__.load({
         setSummary((current) => ({ ...current, loading: false, phase: '' }));
       }, [abortActive]);
 
-      /* ---- 章节：接口失败回落官方章节 / 分 P ---- */
+      /* ---- 章节 / 关键画面：GET /outline 读大纲，POST /outline/visuals 生成画面描述 ---- */
 
-      const loadChapters = useCallback(async (video) => {
-        const target = video ?? docRef.current;
-        if (!target) return;
-        setChapters({ loading: true, error: '', note: '', items: null, source: '', cachedAt: '' });
-        const fallback = (errorText, note) => {
-          const official = Array.isArray(target.officialChapters) ? target.officialChapters.filter(Boolean) : [];
-          if (official.length) {
-            setChapters({
-              loading: false, error: errorText, note: note || '接口没有给出章节，下面是 B 站官方章节', source: 'official',
-              items: official.map((item) => ({ start: item.start ?? null, title: item.title || '(未命名章节)', gist: '' })),
-            });
-            return;
-          }
-          const pages = Array.isArray(target.pages) ? target.pages.filter(Boolean) : [];
-          if (pages.length > 1) {
-            setChapters({
-              loading: false, error: errorText, note: note || '接口没有给出章节，先按分 P 展示', source: 'pages',
-              items: pages.map((page) => ({
-                start: null, pageIndex: page.index ?? 1, title: page.title || `P${page.index ?? 1}`,
-                gist: `第 ${page.index ?? '?'} P${page.duration ? ` · ${fmtTime(page.duration)}` : ''}`,
-              })),
-            });
-            return;
-          }
-          setChapters({ loading: false, error: errorText || '没有拿到章节：这个视频可能太短，或者字幕内容不足。', note: '', items: [], source: '' });
-        };
+      const loadOutline = useCallback(async (video) => {
+        const target = video || docRef.current;
+        if (!target || !target.docId) return;
+        const docId = String(target.docId);
+        setOutline((current) => ({ ...EMPTY_OUTLINE, docId, loading: true }));
         try {
-          const value = await post('chapters', { docId: target.docId, url: target.url });
+          const value = await call('outline', { docId });
           if (!mounted.current || docRef.current !== target) return;
-          const list = value && Array.isArray(value.chapters) ? value.chapters.filter((item) => item && typeof item === 'object') : [];
-          if (!list.length) { fallback('', ''); return; }
-          setChapters({
-            loading: false, error: '', note: '', source: 'api',
-            items: list.map((item) => ({ start: item.start ?? null, title: item.title || '(未命名章节)', gist: item.gist || '' })),
-          });
+          setOutline({ ...EMPTY_OUTLINE, docId, loaded: true, data: value && typeof value === 'object' ? value : null });
         } catch (caught) {
           if (!mounted.current || docRef.current !== target) return;
-          fallback(`章节生成失败：${String(caught?.message ?? caught)}`, '');
+          setOutline({ ...EMPTY_OUTLINE, docId, error: friendlyOutlineError(caught), code: String((caught && caught.code) || '') });
         }
-      }, []);
+      }, [mounted]);
+
+      const generateVisuals = useCallback(async (video, force) => {
+        const target = video || docRef.current;
+        if (!target || !target.docId) return;
+        const docId = String(target.docId);
+        interruptActive();
+        const controller = new AbortController();
+        active.current = { controller, kind: 'outline' };
+        let finished = false;
+        setOutline((current) => ({ ...current, genLoading: true, genPhase: '正在生成画面描述…', genPercent: null, genError: '' }));
+        try {
+          await streamSSE('outline/visuals', { docId, force: Boolean(force) }, {
+            signal: controller.signal,
+            onEvent: (event) => {
+              if (!mounted.current || docRef.current !== target) return 'stop';
+              if (event.type === 'phase') { setOutline((current) => ({ ...current, genPhase: String(event.text || '正在生成画面描述…') })); return undefined; }
+              if (event.type === 'progress') {
+                const raw = event.percent;
+                const percent = raw === null || raw === undefined || raw === '' ? null : Math.max(0, Math.min(100, Number(raw)));
+                setOutline((current) => ({ ...current, genPercent: Number.isFinite(percent) ? percent : null, genPhase: OUTLINE_STAGE_LABEL[event.stage] || current.genPhase }));
+                return undefined;
+              }
+              if (event.type === 'done') {
+                finished = true;
+                const items = Array.isArray(event.items) ? event.items : [];
+                setOutline((current) => ({ ...current, genLoading: false, genPhase: '', genPercent: null, data: { ...(current.data || {}), items, visuals: { generatedAt: new Date().toISOString(), described: true } } }));
+                showToast(event.cached ? '画面描述已缓存' : `已生成 ${items.length} 条画面描述`);
+                return 'stop';
+              }
+              if (event.type === 'error') {
+                setOutline((current) => ({ ...current, genLoading: false, genPhase: '', genPercent: null, genError: friendlyOutlineError({ code: event.code, message: event.message }) }));
+                return 'stop';
+              }
+              return undefined;
+            },
+          });
+          if (!finished && mounted.current) setOutline((current) => ({ ...current, genLoading: false, genPhase: '', genPercent: null, genError: '连接中断了，没有拿到画面描述，请重试。' }));
+        } catch (caught) {
+          if (caught && caught.name === 'AbortError') {
+            if (mounted.current) setOutline((current) => ({ ...current, genLoading: false, genPhase: '', genPercent: null }));
+            return;
+          }
+          if (mounted.current) setOutline((current) => ({ ...current, genLoading: false, genPhase: '', genPercent: null, genError: friendlyOutlineError(caught) }));
+        } finally {
+          if (active.current && active.current.controller === controller) active.current = null;
+        }
+      }, [interruptActive, showToast]);
+
+      const cancelVisuals = useCallback(() => {
+        abortActive();
+        setOutline((current) => ({ ...current, genLoading: false, genPhase: '', genPercent: null }));
+        showToast('已取消生成画面描述');
+      }, [abortActive, showToast]);
 
       /* ---- 本地语音转写：/transcribe SSE（无字幕视频用） ---- */
 
@@ -2772,7 +2728,6 @@ window.__ModuleLoader__.load({
                   setDoc((current) => (current && current.docId === target.docId ? { ...current, transcript } : current));
                 }
                 setChapters(EMPTY_CHAPTERS);
-                setOpenChapter(-1);
                 setTranscribe(EMPTY_TRANSCRIBE);
                 setMindmap(EMPTY_MINDMAP); // 字幕变了，旧导图作废
                 setMmExpanded({});
@@ -2973,86 +2928,6 @@ window.__ModuleLoader__.load({
         showToast('已取消生成分镜');
       }, [abortActive, showToast]);
 
-      /** 关键画面：GET /keyframes，按 docId 缓存；force 用于「重试」。 */
-      const loadKeyframes = useCallback(async (video, force) => {
-        const target = video || docRef.current;
-        if (!target || !target.docId) return;
-        const docId = String(target.docId);
-        if (!force && keyframes.loaded && keyframes.docId === docId) return;
-        setKeyframes({ docId, loading: true, loaded: false, error: '', code: '', items: [] }); setKfShown(0);
-        try {
-          const value = await call('keyframes', { docId, count: KEYFRAME_COUNT });
-          if (!mounted.current || docRef.current !== target) return;
-          const items = (value && Array.isArray(value.items) ? value.items : []).map((item) => ({ seconds: Math.max(0, Math.floor(Number(item && item.seconds) || 0)), label: String((item && item.label) || '') }));
-          setKeyframes({ docId, loading: false, loaded: true, error: '', code: '', items });
-        } catch (caught) {
-          if (!mounted.current || docRef.current !== target) return;
-          setKeyframes({ docId, loading: false, loaded: false, items: [], error: friendlyKeyframesError(caught), code: String((caught && caught.code) || '') });
-        }
-      }, [keyframes.loaded, keyframes.docId, mounted]);
-
-      const loadBookmarks = useCallback(async (video) => {
-        const target = video || docRef.current;
-        if (!target || !target.docId) return;
-        setBookmarks((current) => ({ ...current, loading: true, error: '' }));
-        try {
-          const value = await call('bookmarks', { docId: target.docId });
-          if (!mounted.current || docRef.current !== target) return;
-          setBookmarks({ loading: false, loaded: true, error: '', items: Array.isArray(value && value.items) ? value.items : [] });
-        } catch (caught) {
-          if (!mounted.current || docRef.current !== target) return;
-          setBookmarks({ loading: false, loaded: false, error: friendlyBookmarkError(caught, '加载收藏'), items: [] });
-        }
-      }, []);
-
-      const addBookmark = useCallback(async (segment) => {
-        const target = docRef.current;
-        if (!target || !target.docId) return;
-        const start = Number(segment && segment.start), end = Number(segment && segment.end);
-        const text = String(segment && segment.text ? segment.text : '').trim();
-        if (!Number.isFinite(start) || !text) { showToast('这段字幕不能收藏'); return; }
-        try {
-          const result = await post('bookmarks/add', { docId: target.docId, start, end: Number.isFinite(end) ? end : undefined, text });
-          showToast(result && result.duplicate ? '这一段已经收藏过了' : `已收藏 ${formatClock(start)}`);
-          void loadBookmarks(target);
-        } catch (caught) {
-          showToast(friendlyBookmarkError(caught, '收藏'));
-        }
-      }, [showToast, loadBookmarks]);
-
-      const removeBookmark = useCallback(async (item) => {
-        const target = docRef.current;
-        if (!target || !target.docId || !item || !item.id) return;
-        try {
-          const value = await post('bookmarks/remove', { docId: target.docId, id: item.id });
-          if (!mounted.current || docRef.current !== target) return;
-          setBookmarks((current) => ({ ...current, loaded: true, error: '', items: Array.isArray(value && value.items) ? value.items : current.items.filter((entry) => entry.id !== item.id) }));
-          showToast('已删除这条片段');
-        } catch (caught) {
-          showToast(friendlyBookmarkError(caught, '删除'));
-        }
-      }, [showToast]);
-
-      const clearBookmarks = useCallback(async () => {
-        const target = docRef.current;
-        if (!target || !target.docId) return;
-        try {
-          await post('bookmarks/clear', { docId: target.docId });
-          if (!mounted.current || docRef.current !== target) return;
-          setBookmarks({ loading: false, loaded: true, error: '', items: [] });
-          showToast('已清空片段收藏');
-        } catch (caught) {
-          showToast(friendlyBookmarkError(caught, '清空'));
-        }
-      }, [showToast]);
-
-      /** 片段懒加载：解析后打开「原文」或「片段」页签时才拉取（未加载/无错误时）。 */
-      useEffect(() => {
-        if (!doc || (tab !== 'transcript' && tab !== 'bookmarks')) return;
-        if (bookmarks.loading || bookmarks.loaded || bookmarks.error) return;
-        void loadBookmarks(doc);
-      }, [tab, doc, bookmarks.loading, bookmarks.loaded, bookmarks.error, loadBookmarks]);
-
       /* ---- 原文双语对照：GET /translate 读缓存，没有就 POST SSE 生成（独立取消，不打断其它请求） ---- */
 
       const loadTranslation = useCallback(async (video, lang, options) => {
@@ -3231,9 +3106,8 @@ window.__ModuleLoader__.load({
           setMmExpanded({});
           setStoryboard(EMPTY_STORYBOARD);
           setSbDescribe(false);
-          setKeyframes(EMPTY_KEYFRAMES); setKfShown(0);
-          setBookmarks(EMPTY_BOOKMARKS);
-          setThumbLimit(0);
+          setOutline(EMPTY_OUTLINE);
+          setOutlineView('list');
           // host 0.4.0：doc 可能带分析缓存（summary / chapters / mindmap / chat），有缓存就直接回填。
           const cache = readCachedAnalysis(video);
           if (cache) {
@@ -3349,34 +3223,11 @@ window.__ModuleLoader__.load({
 
       useEffect(() => { void refreshStatus(); void refreshHistory(); void refreshAsr(); }, [refreshStatus, refreshHistory, refreshAsr]);
 
+      // 章节 / 关键画面共用同一份大纲：进入任一页签时按 docId 拉一次。
       useEffect(() => {
-        if (tab !== 'chapters' || !doc || chapters.items !== null || chapters.loading) return;
-        void loadChapters(doc);
-      }, [tab, doc, chapters.items, chapters.loading, loadChapters]);
-
-      // 章节缩略图懒加载：切到章节页签后先挂前 3 张，其余每 120ms 排一张，避免一次打满 Host。
-      useEffect(() => {
-        if (tab !== 'chapters' || !doc) return undefined;
-        const items = Array.isArray(chapters.items) ? chapters.items : [];
-        if (!items.length || thumbLimit >= items.length) return undefined;
-        if (thumbLimit === 0) {
-          setThumbLimit(Math.min(3, items.length));
-          return undefined;
-        }
-        const timer = setTimeout(() => setThumbLimit((current) => Math.min(items.length, current + 1)), 120);
-        return () => { try { clearTimeout(timer); } catch { /* ignore */ } };
-      }, [tab, doc, chapters.items, thumbLimit]);
-
-      // 关键画面：进入页签时按 docId 拉一次，先挂前 4 张，之后每 120ms 递增一张。
-      useEffect(() => {
-        if (tab !== 'keyframes' || !doc) return undefined;
-        if (!keyframes.loading && !keyframes.loaded && !keyframes.error) void loadKeyframes(doc);
-        const items = keyframes.items;
-        if (!items.length || kfShown >= items.length) return undefined;
-        if (kfShown === 0) { setKfShown(Math.min(KEYFRAME_INITIAL, items.length)); return undefined; }
-        const timer = setTimeout(() => setKfShown((current) => Math.min(items.length, current + 1)), KEYFRAME_STEP_MS);
-        return () => { try { clearTimeout(timer); } catch { /* ignore */ } };
-      }, [tab, doc, keyframes.loading, keyframes.loaded, keyframes.error, keyframes.items, kfShown, loadKeyframes]);
+        if (tab !== 'chapters' || !doc) return;
+        if (!outline.loading && !outline.loaded && !outline.error) void loadOutline(doc);
+      }, [tab, doc, outline.loading, outline.loaded, outline.error, loadOutline]);
 
       useEffect(() => {
         if (!overlay) return undefined;
@@ -3429,10 +3280,11 @@ window.__ModuleLoader__.load({
           });
         } else if (tab === 'chapters') {
           tabBody = h(ChaptersTab, {
-            chapters, openIndex: openChapter, currentSeconds, doc, thumbLimit,
-            onToggle: (index) => setOpenChapter(index),
+            outline, doc, currentSeconds, view: outlineView, onView: setOutlineView,
             onSeek: seekTo,
-            onRetry: () => { void loadChapters(doc); },
+            onRetry: () => { void loadOutline(doc); },
+            onGenerate: () => { void generateVisuals(doc, Boolean(outline.data && outline.data.visuals)); },
+            onCancel: cancelVisuals,
           });
         } else if (tab === 'transcript') {
           tabBody = h(TranscriptTab, {
@@ -3450,16 +3302,6 @@ window.__ModuleLoader__.load({
             onToggleFollow: () => setFollow((value) => !value),
             onCancelTranslate: cancelTranslation,
             onRetryTranslate: () => { void loadTranslation(doc, translateTarget, { force: true }); },
-            bookmarkMap: buildBookmarkMap(bookmarks.items),
-            onToggleBookmark: addBookmark,
-          });
-        } else if (tab === 'bookmarks') {
-          tabBody = h(BookmarksTab, {
-            bookmarks, onSeek: seekTo,
-            onCopy: (item) => { void copy(bookmarkCopyText(item), '已复制片段'); },
-            onRemove: (item) => { void removeBookmark(item); },
-            onClear: () => { void clearBookmarks(); },
-            onRetry: () => { void loadBookmarks(docRef.current); },
           });
         } else if (tab === 'mindmap') {
           tabBody = h(MindmapTab, {
@@ -3479,8 +3321,6 @@ window.__ModuleLoader__.load({
             onCancel: cancelStoryboard,
             onSeek: seekTo,
           });
-        } else if (tab === 'keyframes') {
-          tabBody = h(KeyframesTab, { doc, keyframes, shown: kfShown, onSeek: seekTo, onOpenStoryboard: () => setTab('storyboard'), onRetry: () => { void loadKeyframes(docRef.current, true); } });
         }
       }
 
@@ -3496,21 +3336,18 @@ window.__ModuleLoader__.load({
         setError('');
         setSummary(EMPTY_SUMMARY);
         setChapters(EMPTY_CHAPTERS);
-        setThumbLimit(0);
         setTranscribe(EMPTY_TRANSCRIBE);
         setMindmap(EMPTY_MINDMAP);
         setMmExpanded({});
         setStoryboard(EMPTY_STORYBOARD);
         setSbDescribe(false);
-        setKeyframes(EMPTY_KEYFRAMES); setKfShown(0);
-        setBookmarks(EMPTY_BOOKMARKS);
+        setOutline(EMPTY_OUTLINE);
         setChat([]);
         chatRef.current = [];
         setAskInput('');
         setAskBusy(false);
         askBusyRef.current = false;
         setTab('summary');
-        setOpenChapter(-1);
         setSegQuery('');
         setSegAll(false);
         setOverlay('');
@@ -3742,18 +3579,14 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-seg-time{flex:none;min-width:46px;font-size:12px;line-height:20px;color:var(--dsw-alias-brand-primary);font-variant-numeric:tabular-nums}
 .dvv-seg-text{flex:1;min-width:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);word-break:break-word}
 .dvv-seg:hover .dvv-seg-text{color:var(--dsw-alias-label-primary,inherit)}
-.dvv-seg-bm{flex:none;margin-left:auto;padding:0 4px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:0;transition:opacity .15s ease}
-.dvv-seg:hover .dvv-seg-bm,.dvv-seg:focus-visible .dvv-seg-bm,.dvv-seg[data-current="true"] .dvv-seg-bm{opacity:1}
-.dvv-seg-bm[data-on="true"]{opacity:1;color:var(--dsw-alias-state-warn-primary)}
-.dvv-bm-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px}
-.dvv-bm-bar-title{font-size:13px;font-weight:650}
-.dvv-bm-list{display:flex;flex-direction:column;gap:8px}
-.dvv-bm-row{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
-.dvv-bm-time{flex:none;margin-top:1px;padding:1px 7px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-brand-primary);font:inherit;font-size:11px;line-height:18px;font-variant-numeric:tabular-nums;cursor:pointer;white-space:nowrap}
-.dvv-bm-body{flex:1;min-width:0}
-.dvv-bm-label{margin-bottom:2px;font-size:11px;line-height:16px;color:var(--dsw-alias-brand-primary)}
-.dvv-bm-text{font-size:13px;line-height:19px;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
-.dvv-bm-actions{flex:none;margin:0;gap:6px}
+.dvv-ol-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px}
+.dvv-ch-view{display:inline-flex;gap:4px}
+.dvv-ch-view .dvv-btn{padding:0 8px;font-size:11px;line-height:22px;border-radius:6px}
+.dvv-ch{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;text-align:left}
+.dvv-ch-main{flex:1;min-width:0}
+.dvv-ch-top{display:flex;align-items:baseline;gap:8px;min-width:0}
+.dvv-ch-gist{margin-top:2px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dvv-ch-desc{margin-top:3px;font-size:12px;line-height:17px;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
 .dvv-chat{display:flex;flex-direction:column;gap:10px;padding:4px 0 8px}
 .dvv-bubble{max-width:86%;border-radius:12px;padding:8px 12px;font-size:13px;line-height:22px;white-space:pre-wrap;word-break:break-word}
 .dvv-bubble[data-role="user"]{align-self:flex-end;background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-base,Canvas);border-bottom-right-radius:4px}
@@ -3911,9 +3744,10 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-seg[data-tr="true"]{flex-wrap:wrap}
 .dvv-seg[data-current="true"]{background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.12));box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}
 .dvv-tr-text{flex:1 0 100%;margin:2px 0 0 56px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);word-break:break-word}
-/* 关键画面（第 6 步） */
-.dvv-kf-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}.dvv-kf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}.dvv-kf-card{display:flex;flex-direction:column;gap:6px;padding:0;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);color:inherit;text-align:left;cursor:pointer;overflow:hidden}.dvv-kf-card:hover{border-color:var(--dsw-alias-brand-primary)}
-.dvv-kf-thumb{position:relative;width:100%;aspect-ratio:16/9;background:var(--dsw-alias-bg-layer-2)}.dvv-kf-ph{width:100%;height:100%;background:var(--dsw-alias-bg-layer-2)}.dvv-kf-img{display:block;width:100%;height:100%;object-fit:cover}.dvv-kf-time{position:absolute;left:6px;bottom:6px;padding:0 5px;border-radius:5px;font-size:11px;line-height:18px;background:var(--dsw-alias-bg-overlay);color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums}.dvv-kf-label{padding:0 8px 8px;font-size:12px;line-height:17px;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+/* 章节网格视图卡片（复用章节页的大纲数据） */
+.dvv-kf-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}.dvv-kf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}.dvv-kf-card{display:flex;flex-direction:column;gap:6px;padding:0;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);color:inherit;text-align:left;cursor:pointer;overflow:hidden}.dvv-kf-card:hover{border-color:var(--dsw-alias-brand-primary)}
+.dvv-kf-thumb{position:relative;width:100%;aspect-ratio:16/9;background:var(--dsw-alias-bg-layer-2)}.dvv-kf-ph{width:100%;height:100%;background:var(--dsw-alias-bg-layer-2)}.dvv-kf-img{display:block;width:100%;height:100%;object-fit:cover}.dvv-kf-time{position:absolute;left:6px;bottom:6px;padding:0 5px;border-radius:5px;font-size:11px;line-height:18px;background:var(--dsw-alias-bg-overlay);color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums}
+.dvv-kf-body{display:flex;flex-direction:column;gap:2px;padding:0 8px 8px;min-width:0}.dvv-kf-title{font-size:12px;line-height:17px;font-weight:600;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dvv-kf-desc{font-size:12px;line-height:17px;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}.dvv-kf-desc[data-empty="true"]{opacity:.6}
 @media (max-width:979px){
   /* 单列：播放器 → 页签（含字幕提示条） → 追问对话框，整页滚动。
      两栏用 display:contents 摊平，再靠 order 重排。 */

@@ -573,6 +573,34 @@ const CHAPTERS_VALUE = {
   ],
 };
 
+const OUTLINE_VALUE = {
+  docId: 'bilibili:BV1xx411c7mD',
+  duration: BILI_DOC.duration,
+  source: 'mindmap',
+  signature: 'sig-1',
+  visuals: null,
+  items: [
+    { seconds: 0, title: '开场', detail: ['开场先讲今天要解决的问题。'], description: '' },
+    { seconds: 62, title: '核心论点', detail: ['注意力经济让内容碎片化。'], description: '' },
+  ],
+};
+let outlineMode = 'ok';
+
+const OUTLINE_VISUALS_EVENTS = [
+  { type: 'phase', text: '正在准备视频…' },
+  { type: 'progress', stage: 'frames', percent: 40 },
+  { type: 'progress', stage: 'describe', percent: null },
+  {
+    type: 'done',
+    cached: false,
+    items: [
+      { seconds: 0, title: '开场', detail: ['开场先讲今天要解决的问题。'], description: '白色地面上，一只脚走过。' },
+      { seconds: 62, title: '核心论点', detail: ['注意力经济让内容碎片化。'], description: '主持人站在黑板前写公式。' },
+    ],
+    usage: {},
+  },
+];
+
 const STORYBOARD_VALUE = {
   docId: 'bilibili:BV1xx411c7mD',
   url: BILI_DOC.url,
@@ -747,6 +775,11 @@ function resetRoutes() {
       return { ok: true, value: BILI_DOC };
     },
     chapters: () => ({ ok: true, value: CHAPTERS_VALUE }),
+    outline: () => {
+      if (outlineMode === 'notfound') return { ok: false, code: 'not-found', error: '这个视频还没有解析分镜。' };
+      return { ok: true, value: OUTLINE_VALUE };
+    },
+    'outline/visuals': () => ({ __sse: OUTLINE_VISUALS_EVENTS }),
     mindmap: () => ({ ok: true, value: MINDMAP_VALUE }),
     analyze: (call) => ({ __sse: call.body && call.body.mode === 'ask' ? ASK_EVENTS : SUMMARY_EVENTS }),
     transcribe: () => ({ __sse: TRANSCRIBE_EVENTS }),
@@ -987,10 +1020,11 @@ check('下载 .md 触发 a[download]', sandbox.__downloads.length === 1 && /\.md
 check('下载文件名为视频标题', sandbox.__downloads[0] && sandbox.__downloads[0].download === `${BILI_DOC.title}.md`);
 check('下载 blob 类型为 markdown', sandbox.__blobs.length === 1 && String(sandbox.__blobs[0].type).includes('text/markdown'));
 check('下载后 revokeObjectURL', sandbox.__revoked.length === 1);
-checkIncludes('页签包含分镜', nodeText(byClass(tree, 'dvv-tabbar')), '分镜');
-checkIncludes('页签包含片段', nodeText(byClass(tree, 'dvv-tabbar')), '片段');
-check('页签包含关键画面', nodeText(byClass(tree, 'dvv-tabbar')).includes('关键画面'));
-check('页签共 7 个', allByClass(tree, 'dvv-tab').length === 7);
+const tabbarText = nodeText(byClass(tree, 'dvv-tabbar'));
+checkIncludes('页签包含分镜', tabbarText, '分镜');
+checkIncludes('页签包含思维导图', tabbarText, '思维导图');
+check('页签不再包含片段与关键画面', !tabbarText.includes('片段') && !tabbarText.includes('关键画面'));
+check('页签共 5 个', allByClass(tree, 'dvv-tab').length === 5);
 
 // 点总结里的时间徽标 → seek
 const tsBadge = allByClass(tree, 'dvv-md-ts')[0] || allByClass(tree, 'dvv-ts')[0];
@@ -1002,24 +1036,38 @@ const frameWin = (() => {
 })();
 check('点击时间徽标向播放器外壳发 seek', Boolean(frameWin && frameWin.messages.some((msg) => msg && msg.type === 'dsh-video:seek' && msg.seconds === 8)));
 
-/* ---------------------------------------------------------------- 章节页 */
+/* ---------------------------------------------------------------- 章节页（outline 驱动） */
 
 clickText(tree, '章节');
-tree = await settle();
-check('切到章节时 POST /chapters', callsOf('chapters').length >= 1);
+tree = await settle(40);
+const outlineCall = callsOf('outline').slice(-1)[0];
+check('切到章节 GET /outline', Boolean(outlineCall) && outlineCall.method === 'GET'
+  && outlineCall.params.docId === 'bilibili:BV1xx411c7mD');
+checkIncludes('章节来源徽标', nodeText(tree), '按思维导图切分');
+check('章节列表渲染两行', allByClass(tree, 'dvv-ch').length === 2);
 checkIncludes('章节列表标题', nodeText(tree), '开场');
 checkIncludes('章节列表时间戳', nodeText(tree), '[0:00]');
-checkIncludes('章节重新生成按钮', nodeText(tree), '重新生成章节');
-const chapterHead = allByClass(tree, 'dvv-ch-head')[0];
-check('章节头部可展开', Boolean(chapterHead) && click(chapterHead));
-tree = await settle();
-checkIncludes('展开后显示章节 gist', nodeText(tree), '开场先讲今天要解决的问题');
-click(allByClass(tree, 'dvv-ch-head')[1]);
-tree = await settle();
-const chFrame = allByTag(tree, 'iframe')[0];
-check('点击章节发送 seek 到外壳', Boolean(chFrame) && chFrame.contentWindow.messages.some((msg) => msg && msg.seconds === 62));
+checkIncludes('章节显示 gist', nodeText(tree), '开场先讲今天要解决的问题。');
 
-// 章节当前高亮（task-16）：跟随 dsh-video:time
+// 缩略图：/thumb w=160 + 懒加载 + 失败隐藏
+const chThumbs = allByClass(tree, 'dvv-ch-thumb-img');
+check('章节缩略图渲染两张', chThumbs.length === 2);
+check('章节缩略图指向 /thumb w=160', Boolean(chThumbs[0])
+  && String(chThumbs[0].props.src).includes('/dsh-video/api/thumb?docId=bilibili%3ABV1xx411c7mD&seconds=0&w=160'));
+check('章节缩略图支持懒加载', Boolean(chThumbs[0]) && chThumbs[0].props.loading === 'lazy' && chThumbs[0].props.decoding === 'async');
+if (chThumbs[0] && typeof chThumbs[0].props.onError === 'function') chThumbs[0].props.onError({});
+tree = await settle();
+check('章节缩略图失败后隐藏', allByClass(tree, 'dvv-ch-thumb-img').length === 1);
+check('缩略图失败保留占位底色', allByClass(tree, 'dvv-ch-thumb').length === 2);
+
+// 点击章节行 → seek
+click(allByClass(tree, 'dvv-ch')[1]);
+tree = await settle();
+let chFrame = allByTag(tree, 'iframe')[0];
+check('点击章节发送 seek 到外壳', Boolean(chFrame)
+  && chFrame.contentWindow.messages.some((msg) => msg && msg.type === 'dsh-video:seek' && msg.seconds === 62));
+
+// 当前章节高亮：跟随 dsh-video:time
 sandbox.dispatchEvent({ type: 'message', data: { type: 'dsh-video:time', seconds: 30 } });
 tree = await settle();
 let chCurrent = allByClass(tree, 'dvv-ch').filter((node) => node.props['data-current'] === 'true');
@@ -1036,29 +1084,37 @@ tree = await settle();
 chCurrent = allByClass(tree, 'dvv-ch').filter((node) => node.props['data-current'] === 'true');
 check('超出末章 start 时高亮最后一章', chCurrent.length === 1 && nodeText(chCurrent[0]).includes('核心论点'));
 
-/* ---------------------------------------------------------------- 章节缩略图（task-18） */
+// 生成画面描述（POST /outline/visuals SSE）
+const visualsBefore = callsOf('outline/visuals').length;
+clickText(tree, '生成画面描述');
+tree = await settle(80);
+const visualsCall = callsOf('outline/visuals').slice(-1)[0];
+check('生成描述 POST /outline/visuals', callsOf('outline/visuals').length > visualsBefore
+  && Boolean(visualsCall) && visualsCall.body.docId === 'bilibili:BV1xx411c7mD');
+checkIncludes('生成后显示画面描述', nodeText(tree), '白色地面上，一只脚走过。');
+checkIncludes('生成后显示缓存标记', nodeText(tree), '已缓存');
 
-let chThumbs = allByClass(tree, 'dvv-ch-thumb-img');
-check('章节缩略图渲染两张', chThumbs.length === 2);
-const thumb0src = String((chThumbs[0] || {}).props?.src || '');
-const thumb1src = String((chThumbs[1] || {}).props?.src || '');
-checkIncludes('缩略图 src 带 docId', thumb0src, 'docId=bilibili%3ABV1xx411c7mD');
-check('缩略图 src 带秒数与宽度', thumb0src.includes('seconds=0&w=160') && thumb1src.includes('seconds=62&w=160'));
-check('缩略图 use lazy loading + async decoding',
-  (chThumbs[0] || {}).props?.loading === 'lazy' && (chThumbs[0] || {}).props?.decoding === 'async');
-const thumbFrame = allByTag(tree, 'iframe')[0];
-const seekCountBefore = thumbFrame ? thumbFrame.contentWindow.messages.length : 0;
-check('点击缩略图等同点章节行', Boolean(chThumbs[1]) && click(chThumbs[1]));
+// 列表 / 网格切换：共用同一份数据与 SSE 结果
+const gridBtn = allByClass(tree, 'dvv-btn').find((node) => nodeText(node) === '网格');
+check('章节页有列表/网格切换', Boolean(gridBtn));
+const outlineCallsBefore = callsOf('outline').length;
+click(gridBtn);
 tree = await settle();
-const thumbFrame2 = allByTag(tree, 'iframe')[0];
-check('点击缩略图把 62s 发给播放器',
-  Boolean(thumbFrame2) && thumbFrame2.contentWindow.messages.length > seekCountBefore
-  && thumbFrame2.contentWindow.messages.some((msg) => msg && msg.seconds === 62));
-chThumbs = allByClass(tree, 'dvv-ch-thumb-img');
-if (chThumbs[0] && typeof chThumbs[0].props.onError === 'function') chThumbs[0].props.onError({});
+check('网格视图渲染两张卡片', allByClass(tree, 'dvv-kf-card').length === 2);
+check('网格卡片时间徽标', allByClass(tree, 'dvv-kf-time').some((node) => nodeText(node) === '1:02'));
+checkIncludes('网格卡片显示描述', nodeText(tree), '主持人站在黑板前写公式。');
+check('两视图共用数据不重复请求', callsOf('outline').length === outlineCallsBefore);
+const kfCard = allByClass(tree, 'dvv-kf-card').find((node) => nodeText(node).includes('1:02'));
+check('网格卡片缩略图 w=320', Boolean(kfCard)
+  && allByClass(kfCard, 'dvv-kf-img').some((node) => String(node.props.src).includes('seconds=62&w=320')));
+check('点击网格卡片发送 seek', Boolean(kfCard) && click(kfCard));
 tree = await settle();
-check('缩略图加载失败后隐藏 img', allByClass(tree, 'dvv-ch-thumb-img').length === 1);
-check('失败后保留占位底色', allByClass(tree, 'dvv-ch-thumb').length === 2);
+chFrame = allByTag(tree, 'iframe')[0];
+check('网格卡片 seek(62)', Boolean(chFrame) && chFrame.contentWindow.messages.some((msg) => msg && msg.seconds === 62));
+const listBtn = allByClass(tree, 'dvv-btn').find((node) => nodeText(node) === '列表');
+click(listBtn);
+tree = await settle();
+check('切回列表视图', allByClass(tree, 'dvv-ch').length === 2 && allByClass(tree, 'dvv-kf-card').length === 0);
 
 /* ---------------------------------------------------------------- 原文页 */
 
@@ -1201,68 +1257,6 @@ const sbFrame = allByTag(tree, 'iframe')[0];
 check('点击分镜格子发送 seek', Boolean(sbFrame) && sbFrame.contentWindow.messages.some((msg) => msg && msg.seconds === 62));
 const describeBox = byClass(tree, 'dvv-sb-check');
 check('分镜有「附画面描述」开关', Boolean(describeBox) && nodeText(describeBox).includes('附画面描述'));
-
-/* ---------------------------------------------------------------- 关键画面 */
-
-clickText(tree, '关键画面');
-tree = await settle();
-check('切到关键画面 GET /keyframes', callsOf('keyframes').length >= 1);
-const kfCall = lastCallOf('keyframes');
-check('关键画面请求带 docId 与 count=16', Boolean(kfCall) && kfCall.method === 'GET'
-  && kfCall.params.docId === 'bilibili:BV1xx411c7mD' && Number(kfCall.params.count) === 16);
-checkIncludes('关键画面工具条显示张数', nodeText(tree), '8 张');
-check('关键画面首屏只挂 4 张', allByClass(tree, 'dvv-kf-card').length === 4);
-await new Promise((resolve) => setTimeout(resolve, 300));
-tree = await settle();
-check('关键画面懒加载逐步增加', allByClass(tree, 'dvv-kf-card').length > 4);
-for (let round = 0; round < 60 && allByClass(tree, 'dvv-kf-card').length < 8; round += 1) {
-  tree = await settle();
-  await new Promise((resolve) => setTimeout(resolve, 130));
-}
-tree = await settle();
-const kfCards = allByClass(tree, 'dvv-kf-card');
-check('关键画面最终渲染 8 张', kfCards.length === 8);
-checkIncludes('关键画面时间徽标', JSON.stringify(allByClass(tree, 'dvv-kf-time').map(nodeText)), '1:02');
-checkIncludes('关键画面显示章节标题', nodeText(tree), '拆到最本质的问题');
-const kf62Card = kfCards.find((card) => nodeText(card).includes('1:02'));
-const kf62Img = kf62Card ? allByClass(kf62Card, 'dvv-kf-img')[0] : null;
-check('关键画面缩略图指向 host /thumb', Boolean(kf62Img)
-  && String(kf62Img.props.src).includes('/dsh-video/api/thumb?docId=bilibili%3ABV1xx411c7mD&seconds=62&w=320'));
-check('关键画面缩略图懒加载', Boolean(kf62Img) && kf62Img.props.loading === 'lazy');
-check('点击关键画面卡片跳到对应时间', Boolean(kf62Card) && click(kf62Card));
-tree = await settle();
-check('关键画面发送 seek(62)', allByTag(tree, 'iframe')[0].contentWindow.messages.some((msg) => msg && msg.type === 'dsh-video:seek' && msg.seconds === 62));
-clickText(tree, '看完整分镜');
-tree = await settle();
-check('「看完整分镜」切到分镜页', nodeText(tree).includes('打开大图'));
-clickText(tree, '关键画面');
-tree = await settle();
-
-// not-found → 重试
-keyframesMode = 'notfound';
-change(byClass(tree, 'dvv-input'), YT_DOC.url);
-tree = await settle();
-keydown(byClass(tree, 'dvv-input'), 'Enter');
-tree = await settle(60);
-clickText(tree, '关键画面');
-tree = await settle();
-checkIncludes('关键画面 not-found 提示重新解析', nodeText(tree), '先重新解析');
-check('关键画面错误时有重试按钮', Boolean(buttonByText(tree, '重试')));
-keyframesMode = 'ok';
-clickText(tree, '重试');
-tree = await settle();
-check('关键画面重试后加载完成', allByClass(tree, 'dvv-kf-card').length === 4);
-
-// 空态
-keyframesMode = 'empty';
-change(byClass(tree, 'dvv-input'), BILI_DOC.url);
-tree = await settle();
-keydown(byClass(tree, 'dvv-input'), 'Enter');
-tree = await settle(60);
-clickText(tree, '关键画面');
-tree = await settle();
-checkIncludes('关键画面空态提示', nodeText(tree), '没有可用的关键画面');
-keyframesMode = 'ok';
 
 /* ---------------------------------------------------------------- 追问 */
 
@@ -1451,16 +1445,6 @@ tree = await settle();
 checkIncludes('缓存总结直接回填', nodeText(tree), '缓存结论');
 checkIncludes('缓存标记显示', nodeText(tree), '已缓存');
 check('缓存命中不重复生成总结', callsOf('analyze').filter((call) => call.body && call.body.mode === 'summary').length === analyzeSummaryBefore);
-const chaptersBefore = callsOf('chapters').length;
-clickText(tree, '章节');
-tree = await settle();
-checkIncludes('缓存章节回填', nodeText(tree), '缓存章节一');
-check('缓存章节不重复请求', callsOf('chapters').length === chaptersBefore);
-const cacheThumb = allByClass(tree, 'dvv-ch-thumb-img')[0];
-check('切换视频后缩略图用新 docId',
-  Boolean(cacheThumb) && String(cacheThumb.props.src).includes('docId=bilibili%3ABVcache1'));
-check('切换视频后不再渲染旧缩略图',
-  Boolean(cacheThumb) && !String(cacheThumb.props.src).includes('BV1xx411c7mD'));
 clickText(tree, '思维导图');
 tree = await settle();
 checkIncludes('缓存导图回填', nodeText(tree), '缓存分支');
@@ -1502,118 +1486,24 @@ const mdDownloadBtn = buttonByText(tree, '下载 .md');
 check('总结为空时「复制 Markdown」禁用', Boolean(mdCopyBtn) && mdCopyBtn.props.disabled === true);
 check('总结为空时「下载 .md」禁用', Boolean(mdDownloadBtn) && mdDownloadBtn.props.disabled === true);
 
-/* ---------------------------------------------------------------- 片段收藏 */
+/* ---------------------------------------------------------------- 大纲错误与重试 */
 
-// 回到带字幕的 B 站视频
-let bmInput = byClass(tree, 'dvv-input');
-change(bmInput, BILI_DOC.url);
+outlineMode = 'notfound';
+change(byClass(tree, 'dvv-input'), BILI_DOC.url);
 tree = await settle();
-bmInput = byClass(tree, 'dvv-input');
-keydown(bmInput, 'Enter');
-tree = await settle(40);
-
-clickText(tree, '原文');
-tree = await settle(20);
-check('打开原文时拉取收藏列表', callsOf('bookmarks').some((call) => call.method === 'GET'));
-const starNodes = allByClass(tree, 'dvv-seg-bm');
-check('原文每行都有收藏按钮', starNodes.length === SEGMENTS.length);
-check('已收藏的段显示实心星', starNodes.map((node) => nodeText(node)).join('') === '☆★★');
-
-const star0 = allByClass(tree, 'dvv-seg-bm')[0];
-click(star0);
-tree = await settle(20);
-const addCall = callsOf('bookmarks/add')[0];
-check('点 ☆ 收藏 POST /bookmarks/add', Boolean(addCall)
-  && addCall.body.docId === 'bilibili:BV1xx411c7mD'
-  && addCall.body.start === 0 && addCall.body.end === 4
-  && addCall.body.text === '大家好，今天我们聊 AI 编程');
-checkIncludes('收藏成功 toast', nodeText(tree), '已收藏 0:00');
-check('收藏后该行变实心星', allByClass(tree, 'dvv-seg-bm').map((node) => nodeText(node)).join('') === '★★★');
-
-click(allByClass(tree, 'dvv-seg-bm')[0]);
-tree = await settle(20);
-checkIncludes('重复收藏有提示', nodeText(tree), '这一段已经收藏过了');
-
-clickText(tree, '片段');
-tree = await settle(20);
-check('片段页显示已收藏条目', allByClass(tree, 'dvv-bm-row').length === 3);
-checkIncludes('片段显示时间范围', nodeText(tree), '0:00–0:04');
-checkIncludes('片段显示标签', nodeText(tree), '重点');
-checkIncludes('片段显示正文', nodeText(tree), '注意力经济让内容变得碎片化');
-
-const bmTime = allByClass(tree, 'dvv-bm-time')[0];
-click(bmTime);
-tree = await settle();
-check('片段时间徽标跳到对应时间', allByTag(tree, 'iframe')[0].contentWindow.messages
-  .some((msg) => msg && msg.type === 'dsh-video:seek' && msg.seconds === 0));
-
-const copyBtn = buttonByText(tree, '复制');
-click(copyBtn);
-tree = await settle();
-const bmCopy = sandbox.__clipboardWrites[sandbox.__clipboardWrites.length - 1] || '';
-check('复制片段带时间与正文', bmCopy.includes('0:00–0:04') && bmCopy.includes('大家好，今天我们聊 AI 编程'));
-checkIncludes('复制片段 toast', nodeText(tree), '已复制片段');
-
-const delBookmark = buttonByText(tree, '删除');
-click(delBookmark);
-tree = await settle(20);
-check('删除片段 POST /bookmarks/remove', callsOf('bookmarks/remove').length === 1);
-check('删除后剩 2 条', allByClass(tree, 'dvv-bm-row').length === 2);
-
-clickText(tree, '清空');
-tree = await settle();
-checkIncludes('清空片段需二次确认', nodeText(tree), '确认清空？');
-clickText(tree, '确认清空？');
-tree = await settle(20);
-check('清空片段 POST /bookmarks/clear', callsOf('bookmarks/clear').length === 1);
-checkIncludes('清空后片段空态', nodeText(tree), '还没有收藏的片段');
-checkIncludes('清空后引导去原文收藏', nodeText(tree), '在「原文」里点每行右边的 ☆ 就能收进来');
-
-// 收藏加载失败：错误提示 + 重试
-const savedBookmarksRoute = routes.bookmarks;
-routes.bookmarks = () => ({ ok: false, code: 'internal', error: 'boom' });
-let bmInput2 = byClass(tree, 'dvv-input');
-change(bmInput2, YT_DOC.url);
-tree = await settle();
-bmInput2 = byClass(tree, 'dvv-input');
-keydown(bmInput2, 'Enter');
-tree = await settle(40);
-clickText(tree, '片段');
-tree = await settle(20);
-checkIncludes('收藏加载失败显示中文错误', nodeText(tree), '加载收藏失败：boom');
-check('收藏加载失败有重试按钮', Boolean(buttonByText(tree, '重试')));
-routes.bookmarks = savedBookmarksRoute;
-clickText(tree, '重试');
-tree = await settle(20);
-checkIncludes('重试后回到空态', nodeText(tree), '还没有收藏的片段');
-
-/* ---------------------------------------------------------------- 分 P 章节无缩略图 */
-
-const savedResolveRoute = routes.resolve;
-const savedChaptersRoute = routes.chapters;
-routes.resolve = () => ({
-  ok: true,
-  value: makeDoc({
-    docId: 'bilibili:BVpages1',
-    id: 'BVpages1',
-    officialChapters: [],
-    pages: [{ index: 1, title: 'P1 开场', duration: 60 }, { index: 2, title: 'P2 进阶', duration: 120 }],
-  }),
-});
-routes.chapters = () => ({ ok: false, code: 'internal', error: 'boom' });
-let pageInput = byClass(tree, 'dvv-input');
-change(pageInput, 'https://www.bilibili.com/video/BVpages1');
-tree = await settle();
-pageInput = byClass(tree, 'dvv-input');
-keydown(pageInput, 'Enter');
-tree = await settle(40);
+keydown(byClass(tree, 'dvv-input'), 'Enter');
+tree = await settle(60);
 clickText(tree, '章节');
 tree = await settle(30);
-checkIncludes('分 P 回落展示 P1', nodeText(tree), 'P1 开场');
-checkIncludes('分 P 回落有提示', nodeText(tree), '分 P');
-check('start=null 的分 P 章节不渲染缩略图', allByClass(tree, 'dvv-ch-thumb-img').length === 0);
-routes.resolve = savedResolveRoute;
-routes.chapters = savedChaptersRoute;
+checkIncludes('大纲 not-found 中文提示', nodeText(tree), '先重新解析');
+check('大纲错误有重试按钮', Boolean(buttonByText(tree, '重试')));
+outlineMode = 'ok';
+clickText(tree, '重试');
+tree = await settle(30);
+check('大纲重试后恢复列表', allByClass(tree, 'dvv-ch').length === 2);
+change(byClass(tree, 'dvv-input'), BILI_DOC.url);
+keydown(byClass(tree, 'dvv-input'), 'Enter');
+tree = await settle(60);
 
 /* ---------------------------------------------------------------- 错误与返回 */
 
