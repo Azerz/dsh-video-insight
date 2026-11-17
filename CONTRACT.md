@@ -412,6 +412,18 @@ data: {"type":"error","code":"asr-needs-ytdlp","message":"…"}
 - `POST /dsh-video/api/assets/clear` body `{docId}` → `{ok,value:{docId,cleared}}`。
 - 命中缓存时 SSE 的 phase 会写「复用已经下载好的低清视频…」「复用上次扫到的 N 个镜头切点…」。
 
+## 关键画面（keyframes）
+
+`GET /dsh-video/api/keyframes?docId=<docId>&count=16` → `{ok,value:{docId,duration,items:[{seconds,label}]}}`。
+
+- 取点顺序：分析缓存里的章节（`analysis.chapters.items`）→ `doc.officialChapters` → 缓存的镜头切点（`cuts.json`，等步长抽样）→ 均匀铺满（最多 24 个）。
+- `count` 夹在 6–36；视频没解析过返回 `{ok:false,code:'not-found'}`。
+- 缩略图仍需配合 `GET /thumb` 逐张取（客户端懒加载）。
+
+## 历史收藏
+
+`POST /dsh-video/api/history/favorite` body `{docId, favorite}` → `{ok,value:{items}}`（items 与 `GET /history` 同形，`favorite` 布尔）。重新解析同一视频不会覆盖已有收藏状态。
+
 ## 画面缩略图（thumb）
 
 从缓存的低清视频按秒截一帧，给章节列表 / 关键画面用：

@@ -16,7 +16,8 @@ window.__ModuleLoader__.load({
 
     const PANEL_ID = 'video';
     const PLAYER_KEY = 'dsh-video.player.collapsed';
-    const HISTORY_LIMIT = 20;
+    const HISTORY_LIMIT = 100;
+    const HOME_RECENT_LIMIT = 10;
     const SEGMENT_LIMIT = 400;
 
     /** 同源 API 基址：应用路由是 document-relative，所以从 baseURI 解析。 */
@@ -1762,8 +1763,8 @@ window.__ModuleLoader__.load({
       return h('img', { className: 'dvv-hist-cover', src: url, alt: alt ?? '', loading: 'lazy', onError: () => setBroken(true) });
     }
 
-    /** 一条历史记录：封面、标题、作者/时长、平台标签、相对时间、字幕标记、删除。 */
-    function HistoryRow({ item, onOpen, onRemove }) {
+    /** 一条历史记录：封面、标题、作者/时长、平台标签、相对时间、字幕标记、星标、删除。 */
+    function HistoryRow({ item, onOpen, onRemove, onFavorite }) {
       const platform = item.platform || guessPlatform(item.url);
       const duration = Number(item.duration) > 0 ? fmtTime(item.duration) : '';
       return h('div', {
@@ -1788,6 +1789,14 @@ window.__ModuleLoader__.load({
             Number(item.chatCount) > 0 ? h('span', { key: 'chat', className: 'dvv-mini' }, `${Number(item.chatCount)} 条对话`) : null,
           ]),
         ]),
+        onFavorite ? h('button', {
+          key: 'fav', type: 'button', className: 'dvv-fav', 'data-on': item.favorite ? 'true' : 'false',
+          title: item.favorite ? '取消收藏' : '收藏', 'aria-label': item.favorite ? '取消收藏' : '收藏',
+          onClick: (event) => {
+            if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+            onFavorite(item);
+          },
+        }, item.favorite ? '★' : '☆') : null,
         onRemove ? h('button', {
           key: 'del', type: 'button', className: 'dvv-del', title: '删除这条记录', 'aria-label': '删除这条记录',
           onClick: (event) => {
@@ -1798,37 +1807,74 @@ window.__ModuleLoader__.load({
       ].filter(Boolean));
     }
 
-    /** 无视频空态时直接铺在主区的历史列表（复用抽屉里的行）。 */
-    function HistoryList({ items, onOpen, onRemove }) {
-      if (!Array.isArray(items) || !items.length) return null;
+    /** 无视频空态时直接铺在主区的历史列表：只展示前 10 条，更多去抽屉。 */
+    function HistoryList({ items, onOpen, onRemove, onFavorite, onOpenAll }) {
+      const all = Array.isArray(items) ? items : [];
+      if (!all.length) return null;
+      const shown = all.slice(0, HOME_RECENT_LIMIT);
       return h('section', { className: 'dvv-recent' }, [
         h('div', { key: 'head', className: 'dvv-recent-head' }, [
           h('span', { key: 't', className: 'dvv-label' }, '最近分析'),
-          h('span', { key: 'c', className: 'dvv-note' }, `共 ${items.length} 条`),
-        ]),
-        h('div', { key: 'list', className: 'dvv-hist-list' }, items.map((item, index) => h(HistoryRow, {
-          key: `${item.docId || item.url || 'item'}-${index}`, item, onOpen, onRemove,
+          h('span', { key: 'c', className: 'dvv-note' }, `共 ${all.length} 条 · 最多保留 ${HISTORY_LIMIT} 条`),
+          h('div', { key: 's', className: 'dvv-spacer' }),
+          all.length > HOME_RECENT_LIMIT && onOpenAll
+            ? h('button', { key: 'more', type: 'button', className: 'dvv-btn dvv-btn-mini', onClick: onOpenAll }, '打开历史查看全部')
+            : null,
+        ].filter(Boolean)),
+        h('div', { key: 'list', className: 'dvv-hist-list' }, shown.map((item, index) => h(HistoryRow, {
+          key: `${item.docId || item.url || 'item'}-${index}`, item, onOpen, onRemove, onFavorite,
         }))),
       ]);
     }
 
-    function HistoryDrawer({ items, error, onOpen, onRemove, onClear, onClose }) {
+    function HistoryDrawer({ items, error, query, filter, onQuery, onFilter, onOpen, onRemove, onFavorite, onClear, onClose }) {
       const [confirming, setConfirming] = useState(false);
       const list = Array.isArray(items) ? items : [];
+      const needle = String(query ?? '').trim().toLowerCase();
+      const favoriteOnly = filter === 'favorite';
+      const visible = list.filter((item) => {
+        if (favoriteOnly && !item.favorite) return false;
+        if (!needle) return true;
+        const hay = [item.title, item.author, item.url, item.platform]
+          .map((value) => String(value ?? '')).join(' ').toLowerCase();
+        return hay.includes(needle);
+      });
       return h('div', { className: 'dvv-overlay', onClick: onClose }, h('div', {
         key: 'drawer', className: 'dvv-drawer', onClick: (event) => { if (event && typeof event.stopPropagation === 'function') event.stopPropagation(); },
       }, [
         h('div', { key: 'head', className: 'dvv-drawer-head' }, [
           h('div', { key: 't', className: 'dvv-drawer-title' }, `历史记录${list.length ? ` · ${list.length}` : ''}`),
+          h('span', { key: 'limit', className: 'dvv-note' }, `最多保留 ${HISTORY_LIMIT} 条`),
           h('button', { key: 'close', type: 'button', className: 'dvv-btn', onClick: onClose }, '关闭'),
+        ]),
+        h('div', { key: 'bar', className: 'dvv-hist-bar' }, [
+          h('input', {
+            key: 'q', className: 'dvv-search', type: 'text', value: String(query ?? ''),
+            placeholder: '搜索标题 / 作者 / 链接', 'aria-label': '搜索历史记录', spellCheck: false,
+            onChange: (event) => onQuery(event.target.value),
+          }),
+          h('div', { key: 'f', className: 'dvv-hist-filters' }, [
+            h('button', {
+              key: 'all', type: 'button', className: 'dvv-btn dvv-btn-mini',
+              'data-active': favoriteOnly ? undefined : 'true', onClick: () => onFilter('all'),
+            }, '全部'),
+            h('button', {
+              key: 'fav', type: 'button', className: 'dvv-btn dvv-btn-mini',
+              'data-active': favoriteOnly ? 'true' : undefined, onClick: () => onFilter('favorite'),
+            }, '已收藏'),
+          ]),
+          h('span', { key: 'c', className: 'dvv-hist-count' }, `${visible.length} / ${list.length}`),
         ]),
         h('div', { key: 'body', className: 'dvv-drawer-body' }, [
           error ? h('div', { key: 'err', className: 'dvv-error' }, error) : null,
-          list.length ? list.map((item, index) => h(HistoryRow, {
+          visible.length ? visible.map((item, index) => h(HistoryRow, {
             key: `${item.docId || item.url || 'item'}-${index}`, item,
             onOpen: (picked) => { setConfirming(false); onOpen(picked); },
-            onRemove,
-          })) : h('div', { key: 'empty', className: 'dvv-empty-note' }, '还没有分析记录。解析过的视频会出现在这里，最多保留 20 条。'),
+            onRemove, onFavorite,
+          })) : h('div', { key: 'empty', className: 'dvv-empty-note' },
+            list.length
+              ? '没有匹配的历史记录'
+              : `还没有分析记录。解析过的视频会出现在这里，最多保留 ${HISTORY_LIMIT} 条。`),
         ].filter(Boolean)),
         h('div', { key: 'foot', className: 'dvv-drawer-foot' }, [
           h('button', {
@@ -2168,6 +2214,8 @@ window.__ModuleLoader__.load({
       const [cookieNote, setCookieNote] = useState('');
       const [historyItems, setHistoryItems] = useState([]);
       const [historyError, setHistoryError] = useState('');
+      const [historyQuery, setHistoryQuery] = useState('');
+      const [historyFilter, setHistoryFilter] = useState('all');
       const [playerCollapsed, setPlayerCollapsed] = useState(() => readPlayerCollapsed());
       const [toast, setToast] = useState('');
       const [asr, setAsr] = useState(null);
@@ -2311,7 +2359,7 @@ window.__ModuleLoader__.load({
         }
       }, []);
 
-      /** host 返回完整列表，直接替换本地状态（20 条上限由 host 保证，这里再裁一次）。 */
+      /** host 返回完整列表，直接替换本地状态（100 条上限由 host 保证，这里再裁一次）。 */
       const applyHistory = useCallback((value) => {
         const items = value && Array.isArray(value.items) ? value.items.filter(Boolean).slice(0, HISTORY_LIMIT) : [];
         setHistoryItems(items);
@@ -2339,6 +2387,21 @@ window.__ModuleLoader__.load({
           showToast('历史已清空');
         } catch (caught) {
           if (mounted.current) showToast(`清空失败：${String(caught?.message ?? caught)}`);
+        }
+      }, [applyHistory, showToast]);
+
+      /** 星标：POST /history/favorite，成功后用 host 返回的完整列表替换本地并提示。 */
+      const toggleHistoryFavorite = useCallback(async (item) => {
+        const docId = String((item && item.docId) || '');
+        if (!docId) { showToast('这条记录缺少 docId，无法收藏'); return; }
+        const favorite = !(item && item.favorite);
+        try {
+          const value = await post('history/favorite', { docId, favorite });
+          if (!mounted.current) return;
+          applyHistory(value);
+          showToast(favorite ? '已收藏' : '已取消收藏');
+        } catch (caught) {
+          if (mounted.current) showToast(`收藏失败：${String(caught?.message ?? caught)}`);
         }
       }, [applyHistory, showToast]);
 
@@ -3414,7 +3477,10 @@ window.__ModuleLoader__.load({
           }),
           historyItems.length
             ? h('div', { key: 'recent', className: 'dvv-home-recent' }, h(HistoryList, {
-                items: historyItems, onOpen: openHistoryItem, onRemove: (item) => { void removeHistory(item); },
+                items: historyItems, onOpen: openHistoryItem,
+                onRemove: (item) => { void removeHistory(item); },
+                onFavorite: (item) => { void toggleHistoryFavorite(item); },
+                onOpenAll: () => setOverlay('history'),
               }))
             : h('div', { key: 'none', className: 'dvv-home-none' }, '还没有分析记录，粘贴一个链接开始吧。'),
         ].filter(Boolean));
@@ -3471,8 +3537,12 @@ window.__ModuleLoader__.load({
         body,
         overlay === 'history' ? h(HistoryDrawer, {
           key: 'drawer', items: historyItems, error: historyError,
+          query: historyQuery, filter: historyFilter,
+          onQuery: (value) => setHistoryQuery(value),
+          onFilter: (value) => setHistoryFilter(value),
           onOpen: openHistoryItem,
           onRemove: (item) => { void removeHistory(item); },
+          onFavorite: (item) => { void toggleHistoryFavorite(item); },
           onClear: () => { void clearHistory(); },
           onClose: () => setOverlay(''),
         }) : null,
@@ -3670,6 +3740,15 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-recent-head{display:flex;align-items:baseline;gap:8px;padding:2px 0 8px}
 .dvv-hist-list{display:flex;flex-direction:column;gap:2px}
 .dvv-hist-sub{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:2px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}
+/* 历史搜索 / 收藏筛选 / 星标（第 5 步） */
+.dvv-hist-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:2px 0 8px}
+.dvv-hist-bar .dvv-search{flex:1;min-width:130px}
+.dvv-hist-filters{flex:none;display:flex;gap:4px}
+.dvv-btn-mini[data-active="true"]{background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.14));border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary);font-weight:600}
+.dvv-hist-count{flex:none;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+.dvv-fav{flex:none;appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font-size:16px;line-height:24px;padding:0 2px;cursor:pointer;opacity:0}
+.dvv-hist:hover .dvv-fav,.dvv-fav[data-on="true"]{opacity:1}
+.dvv-fav[data-on="true"]{color:var(--dsw-alias-state-warn-primary)}
 .dvv-hist-author{max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dvv-hist-cover-ph{background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.12))}
 .dvv-mini{font-size:10px;line-height:15px;padding:0 5px;border-radius:999px;background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.14));color:var(--dsw-alias-label-secondary)}

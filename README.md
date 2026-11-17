@@ -30,10 +30,11 @@
 | 片段 | 收藏的片段列表：原文里点行尾的 ☆ 就能收进来，点一条跳到那个位置并继续播放，也可以复制文字或删除 |
 | 原文 | 字幕逐段列表（`[mm:ss] 文本`），可搜索过滤、点单条复制、一键复制全文；「双语」开关把每段翻译成中文/英文（`POST /translate`，按批送模型、结果按视频缓存），开启「跟随」后播放器播到哪、对应段落就高亮滚到视野里（时间轴同步由播放器外壳每秒回传） |
 | 思维导图 | 模型把字幕整理成 3 层树状大纲（`GET /mindmap`，带缓存），面板渲染成 **SVG 图形化横向树**（节点卡片 + 贝塞尔连线、按分支配色），点节点折叠/展开，支持全部展开/收起、缩放、重新生成；节点上带可点的时间徽标（模型按字幕定位），点一下跳到视频对应位置 |
+| 关键画面 | 关键画面总览（PPT 模式）：`GET /keyframes` 优先取章节起点（带章节标题），没有章节就按镜头切点，最后均匀铺；卡片式网格 + 缩略图，点一张跳到那个画面并继续播放，适合快速扫全片结构 |
 | 分镜 | 按镜头切点抽帧、拼成一张**分镜拼图**（`POST /storyboard`，默认 24 格按 3 列排；行数按帧数自动），每格左上角标时间；点任意一格跳到那个画面并继续播放。可选「附画面描述」让视觉模型给每格写一句描述（悬停格子可见）。图片按视频缓存在 `~/.dsh/video-storyboards/`，切回页签秒开；低清视频和镜头切点也按视频缓存在 `~/.dsh/video-assets/`，转写、画面理解、分镜共用同一份，第二次打开页签不再重新下载 |
 | 追问 | 左栏下方对话框：基于转写稿的 RAG 多轮问答（检索相关段落后再回答），回答带 `[mm:ss]`，下方「依据」chip 可点击跳转；对话按视频缓存。空态先给固定三句，再给 **AI 根据本视频总结生成的 3 条建议追问**（虚线 chip，点一下直接问） |
 | 设置 | 填 B 站 Cookie（SESSDATA），保存到 `~/.dsh/video-credentials.json`（0600）；可清除 |
-| 历史 | 最近 20 条解析/分析记录，存在 `~/.dsh/video-history.json`（跨浏览器、跨重启都在），点击重新打开，可单条删除或清空 |
+| 历史 | 最近 100 条解析/分析记录（可搜索、可收藏星标），存在 `~/.dsh/video-history.json`（跨浏览器、跨重启都在），点击重新打开，可单条删除或清空 |
 
 左栏的**可折叠内嵌播放器**：面板里的 iframe 指向 host 的 `/dsh-video/api/player` 外壳页——桌面客户端主界面跑在 `dsh-app://` 自定义协议下，直接嵌 YouTube 会被拒绝播放，外壳页以 http 起源加载后再嵌真正的播放器：YouTube 走官方 IFrame Player API（`seekTo` + `playVideo`，点时间戳直接跳过去并继续播放），B 站走 `player.bilibili.com`（分 P、`t` 起始秒数都支持，seek 只重载内层 iframe）。章节、原文、思维导图里的时间戳点了会 seek 到对应位置，折叠状态下会先展开再跳。折叠偏好记在 localStorage。窄窗口（<980px）自动改成单列堆叠。
 
@@ -165,6 +166,8 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | POST | `/dsh-video/api/bookmarks/add` | `{docId?/url?, start, end?, text, label?}` 新增收藏（同时间点同文本自动去重）：`{ok,value:{item,duplicate,count}}` |
 | POST | `/dsh-video/api/bookmarks/remove` | `{docId, id}` 删除一条 |
 | POST | `/dsh-video/api/bookmarks/clear` | `{docId}` 清空该视频的收藏 |
+| POST | `/dsh-video/api/history/favorite` | `{docId, favorite}` 历史列表星标：返回 `{ok,value:{items}}`（重新解析不会冲掉） |
+| GET | `/dsh-video/api/keyframes?docId=&count=16` | 关键画面时间点：`{ok,value:{docId,duration,items:[{seconds,label}]}}`（优先章节起点，其次镜头切点，最后均匀） |
 | GET | `/dsh-video/api/thumb?docId=&seconds=&w=320` | 某个时间点的画面缩略图（`image/jpeg`，320×180；从缓存的低清视频里截，同一时间点只截一次）；也可传 `url=` 代替 `docId=` |
 | GET | `/dsh-video/api/assets?docId=` | 素材缓存状态：`{ok,value:{video:{bytes,duration,downloadedAt},cuts:{count,threshold,createdAt}}}` 或 `null` |
 | POST | `/dsh-video/api/assets/clear` | `{docId}` 清掉该视频的低清视频与切点缓存 |
