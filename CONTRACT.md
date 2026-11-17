@@ -347,6 +347,32 @@ data: {"type":"error","code":"asr-needs-ytdlp","message":"…"}
 - seek：面板向外壳 iframe `postMessage({type:'dsh-video:seek', seconds})`；外壳先排队到播放器就绪，再 `seekTo(秒, true)` + `playVideo()`（哔哩哔哩重建内层 src 带 `t` 与 `autoplay=1`）——点时间戳即跳到对应位置并开始播放。
 - 初始定位只用 URL 上的 `start` 参数；**不要**在 iframe 首次加载时主动发 seekTo（实测会在播放器就绪前黑屏），seekTo 只在用户点时间戳时发。
 - 外壳加载完成会向 parent 发 `{type:'dsh-video:wrapper'}`，面板可据此补发 pending seek。
+## 分镜（storyboard）
+
+把视频按**镜头切点**抽帧、拼成一张带时间戳的分镜拼图，供面板「分镜」页签显示、点格子 seek。图片与元数据按视频缓存在 `~/.dsh/video-storyboards/`：
+
+- 文件：`<safeId(docId)>.jpg`（拼图）+ `<safeId(docId)>.json`（元数据）。`safeId` 把非 `[A-Za-z0-9_-]` 字符换成 `_`，截 160 字符。清掉任意一个即视为没有缓存。
+- 生成流程（host 内部）：`captureFrames`（yt-dlp 下 ≤480p、ffmpeg 4fps 64×36 rawvideo 扫切点、按镜头取 ≤24 帧）→ `buildContactSheet`（ffmpeg `tile` 拼 3 列 × 自动行数，格子 512×288）→ 复制 jpg 落盘 →（可选）`describeSheet` 让视觉模型逐格描述并把 `description` 合并进 cells → 原子写 JSON。
+- JSON 形状：
+  ```json
+  {
+    "docId": "youtube:aqz-KE-bpKQ", "url": "…", "title": "…", "platform": "youtube",
+    "duration": 634, "generatedAt": 1794981000000, "tookMs": 9200,
+    "frameSampling": "cuts", "cuts": 146, "frames": 24,
+    "cols": 3, "rows": 8, "cellWidth": 512, "cellHeight": 288, "described": false,
+    "cells": [{"index": 1, "row": 0, "col": 0, "seconds": 8}, {"index": 2, "row": 0, "col": 1, "seconds": 33.38}]
+  }
+  ```
+  `seconds` 是该格画面的绝对秒数（它在原视频里的时间），`row/col` 从 0 开始。有 `describe` 时每格多一个 `description`（≤160 字）。
+- `GET /storyboard?docId=<docId>` → `{ok:true, value:<上面的对象>|null}`；缓存缺失/损坏返回 `value:null`。
+- `GET /storyboard/image?docId=<docId>` → `image/jpeg`（`cache-control: no-store`）；没有缓存时 `404 {ok:false,code:'not-found'}`。客户端要用 `?v=<generatedAt>` 破缓存。
+- `POST /storyboard/clear` body `{docId}` → `{ok:true}`（删 json + jpg）。
+- `POST /storyboard`（SSE）body `{docId?/url?, frames?:24, cols?:3, describe?:boolean, force?:boolean}`：
+  - 未 force 且已有缓存、且（没要 `describe` 或缓存本来就 `described`）→ 直接 `done cached:true`；
+  - 帧：`{type:'phase',text}`、`{type:'progress',stage:'download'|'scan'|'frames',percent}`、`{type:'done',cached:false,docId,storyboard}`、`{type:'error',code,message}`；
+  - 错误码：`bad-url`、`unsupported`、`ocr-needs-ytdlp`、`ocr-no-ffmpeg`、`ocr-empty`、`sheet-empty`、`sheet-failed`、`vision-*`、`aborted`、`internal`。
+- 说明：分镜不依赖字幕（无字幕/无声视频也能出图）；`describe` 会调用视觉模型（图片会离开本机），不开时纯本机处理。
+
 ## 工具（agent-facing）
 
 插件在 `ctx.inject(['tools'])` 里注册两个**全局**工具（fiber 不是 agent scope，所以任何会话——包括 qqbot 用 `ctx.agents.create()` 起的 QQ 会话——都看得见）：

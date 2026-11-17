@@ -38,6 +38,9 @@ window.__ModuleLoader__.load({
     };
     const STAGE_LABEL = { vision: '画面理解中', ocr: '画面文字识别中' };
     const VISION_MODEL_PLACEHOLDER = 'opencode-go/deepseek-v4.1-flash';
+    /** 分镜：host 生成的分镜拼图（GET 读缓存 / POST SSE 生成），格子带秒数可 seek。 */
+    const EMPTY_STORYBOARD = { data: null, loading: false, phase: '', percent: null, error: '', code: '' };
+    const STORYBOARD_STAGE_LABEL = { download: '正在下载视频…', scan: '正在扫描镜头…', frames: '正在抽取画面…' };
 
     /* ------------------------------------------------------------------ 常量 */
 
@@ -56,7 +59,7 @@ window.__ModuleLoader__.load({
       zh: '中文', 'zh-cn': '中文', 'zh-hans': '中文', 'zh-tw': '繁體中文', 'zh-hant': '繁體中文',
       en: 'English', 'en-us': 'English', 'en-gb': 'English', ja: '日本語', ko: '한국어',
     };
-    const TABS = [['summary', '总结'], ['chapters', '章节'], ['transcript', '原文'], ['mindmap', '思维导图']];
+    const TABS = [['summary', '总结'], ['chapters', '章节'], ['transcript', '原文'], ['mindmap', '思维导图'], ['storyboard', '分镜']];
     const ASK_EXAMPLES = ['这个视频最核心的论点是什么？', '作者的观点有哪些可疑之处？', '用 5 句话讲给完全不懂的人听'];
 
     function platformMeta(platform) {
@@ -186,6 +189,11 @@ window.__ModuleLoader__.load({
       return hours > 0 ? `${hours}:${pad2(Math.floor(total / 60) % 60)}:${pad2(total % 60)}` : tail;
     }
     /** `[03:12]` / `[1:03:12]` 里的时钟 → 秒数；解析失败返回 null。 */
+    /** 分镜格子的时间戳（与字幕时间一致：mm:ss，超过 1 小时带小时）。 */
+    function formatClock(seconds) {
+      return fmtTime(seconds);
+    }
+
     function clockToSeconds(label) {
       const text = String(label ?? '').trim().replace(/^\[/, '').replace(/\]$/, '');
       const match = /^(\d{1,3}):([0-5]\d)(?::([0-5]\d))?$/.exec(text);
@@ -1070,6 +1078,38 @@ window.__ModuleLoader__.load({
     const MM_DEPTH_WIDTHS = [200, 170, 150];
     const MM_BRANCH_COUNT = 8;
 
+    /* -------------------------------------------------------------- 分镜 */
+
+    /** 分镜图地址：优先 transport 的 http 起源，其次同源相对路径（与播放器外壳一致）。 */
+    function storyboardImageSrc(storyboard, docId) {
+      const id = String((storyboard && storyboard.docId) || docId || '').trim();
+      if (!id) return '';
+      const version = storyboard && storyboard.generatedAt ? String(storyboard.generatedAt) : '';
+      let path = `/dsh-video/api/storyboard/image?docId=${encodeURIComponent(id)}`;
+      if (version) path += `&v=${encodeURIComponent(version)}`;
+      const transport = playerTransportBase();
+      return transport ? `${transport}${path}` : path;
+    }
+
+    /** 分镜进度 stage → 中文文案。 */
+    function storyboardStageText(stage) {
+      return STORYBOARD_STAGE_LABEL[stage] ?? '';
+    }
+
+    /** 分镜错误：code → 用户能看懂的中文（缺工具时给出安装提示）。 */
+    function friendlyStoryboardError(error) {
+      const code = String((error && error.code) || '');
+      const message = String((error && error.message) || error || '未知错误');
+      if (code === 'ocr-needs-ytdlp') return '生成分镜需要下载视频：请先执行 brew install yt-dlp，或去设置里检查本机组件。';
+      if (code === 'ocr-no-ffmpeg') return '生成分镜需要 ffmpeg：请先执行 brew install ffmpeg，或去设置里检查本机组件。';
+      if (code === 'ocr-empty') return `这个视频没有抽到可用的画面：${message}`;
+      if (code === 'bad-url') return '没有解析出视频链接，请重新粘贴链接解析。';
+      if (code === 'vision-unavailable' || code === 'vision-no-model' || code === 'vision-failed') {
+        return `画面描述没生成成：${message}。分镜只需要画面时可以关掉「附画面描述」再重试。`;
+      }
+      return `生成分镜失败：${message}`;
+    }
+
     function mindmapNodeWidth(depth) {
       const index = Math.max(0, Math.min(Number(depth) || 0, MM_DEPTH_WIDTHS.length - 1));
       return MM_DEPTH_WIDTHS[index];
@@ -1304,6 +1344,101 @@ window.__ModuleLoader__.load({
         metaBits.length ? h('div', { key: 'meta', className: 'dvv-mm-meta dvv-note' }, metaBits.join(' · ')) : null,
         body,
       ].filter(Boolean));
+    }
+
+    /* -------------------------------------------------------------- 分镜 */
+
+    /** 分镜页签：host 拼好的分镜图 + 每格时间戳覆盖层（点击 seek）。 */
+    function StoryboardTab({ doc, storyboard, describe, onDescribe, onGenerate, onCancel, onSeek }) {
+      const [broken, setBroken] = useState(false);
+      const data = storyboard ? storyboard.data : null;
+      const loading = Boolean(storyboard && storyboard.loading);
+      const error = storyboard ? storyboard.error : '';
+      useEffect(() => { setBroken(false); }, [data && data.generatedAt]);
+      if (!doc) {
+        return h('div', { className: 'dvv-tabpane dvv-sb-tab' },
+          h('div', { className: 'dvv-empty-note' }, '先解析一个视频，再来看它的分镜。'));
+      }
+      const toolbar = h('div', { key: 'bar', className: 'dvv-sb-toolbar' }, [
+        data ? h('span', { key: 'cached', className: 'dvv-mini' },
+          storyboard.cached === false ? '刚刚生成' : `已缓存${data.generatedAt ? ` · ${fmtRelative(data.generatedAt)}` : ''}`) : null,
+        data && data.described ? h('span', { key: 'described', className: 'dvv-mini', 'data-ok': 'true' }, '含描述') : null,
+        data && data.frames ? h('span', { key: 'count', className: 'dvv-sb-meta' }, `${data.frames} 格 · ${data.cols || '?'}×${data.rows || '?'}`) : null,
+        data && data.frames ? h('span', { key: 'sampling', className: 'dvv-sb-meta' },
+          data.frameSampling === 'interval' ? '按间隔抽帧' : '按镜头切点抽帧') : null,
+        h('span', { key: 'spacer', className: 'dvv-sb-spacer' }),
+        h('label', { key: 'describe', className: 'dvv-sb-check' }, [
+          h('input', {
+            key: 'input', type: 'checkbox', checked: Boolean(describe),
+            onChange: (event) => onDescribe(event.target.checked),
+          }),
+          '附画面描述',
+        ]),
+        data ? h('a', {
+          key: 'big', className: 'dvv-btn dvv-link-btn',
+          href: storyboardImageSrc(data, doc.docId), target: '_blank', rel: 'noreferrer',
+        }, '打开大图') : null,
+        h('button', {
+          key: 'generate', type: 'button', className: 'dvv-btn', disabled: loading,
+          onClick: () => onGenerate(),
+        }, loading ? '生成中…' : (data ? '重新生成' : '生成分镜')),
+      ].filter(Boolean));
+      let body;
+      if (loading) {
+        body = h('div', { key: 'progress', className: 'dvv-sb-progress' }, [
+          h(AsrProgress, { key: 'progress', percent: storyboard.percent }),
+          h('div', { key: 'phase', className: 'dvv-asr-phase' }, storyboard.phase || '正在生成分镜…'),
+          h('div', { key: 'actions', className: 'dvv-actions' },
+            h('button', { key: 'cancel', type: 'button', className: 'dvv-btn', onClick: onCancel }, '取消')),
+        ]);
+      } else if (error) {
+        body = h('div', { key: 'error', className: 'dvv-error' }, [
+          h('span', { key: 'text' }, error),
+          h('button', { key: 'retry', type: 'button', className: 'dvv-btn', onClick: () => onGenerate() }, '重试'),
+        ]);
+      } else if (!data) {
+        body = h('div', { key: 'empty', className: 'dvv-empty-note' },
+          '这个视频还没有分镜。点「生成分镜」，把整段视频的画面拼成一张图。');
+      } else {
+        const cells = Array.isArray(data.cells) ? data.cells : [];
+        const cols = Math.max(1, Number(data.cols) || 1);
+        const rows = Math.max(1, Number(data.rows) || 1);
+        const imageSrc = storyboardImageSrc(data, doc.docId);
+        body = h('div', { key: 'sheet', className: 'dvv-sb-wrap' }, [
+          broken
+            ? h('div', { key: 'broken', className: 'dvv-sb-broken' }, [
+              h('div', { key: 'title', className: 'dvv-sb-broken-title' }, '分镜图加载失败'),
+              h('button', { key: 'retry', type: 'button', className: 'dvv-btn', onClick: () => onGenerate() }, '重新生成'),
+            ])
+            : h('div', { key: 'sb', className: 'dvv-sb' }, [
+              h('img', {
+                key: 'img', className: 'dvv-sb-img', src: imageSrc,
+                alt: `${doc.title || '视频'} 的分镜图`, loading: 'lazy',
+                onError: () => setBroken(true),
+              }),
+              ...cells.map((cell) => {
+                const col = Math.max(0, Number(cell.col) || 0);
+                const row = Math.max(0, Number(cell.row) || 0);
+                const label = formatClock(cell.seconds);
+                return h('button', {
+                  key: `cell-${cell.index}-${row}-${col}`, type: 'button', className: 'dvv-sb-cell',
+                  style: {
+                    left: `${(col / cols) * 100}%`,
+                    top: `${(row / rows) * 100}%`,
+                    width: `${100 / cols}%`,
+                    height: `${100 / rows}%`,
+                  },
+                  title: cell.description || `跳到 ${label}`,
+                  'data-seconds': String(cell.seconds),
+                  onClick: () => onSeek(cell.seconds),
+                }, h('span', { key: 'clock', className: 'dvv-sb-clock' }, label));
+              }),
+            ]),
+          data.described ? h('div', { key: 'note', className: 'dvv-sb-note' },
+            '把鼠标放到格子上可以看到画面描述；点击格子会跳到对应画面。') : null,
+        ].filter(Boolean));
+      }
+      return h('div', { className: 'dvv-tabpane dvv-sb-tab' }, [toolbar, body].filter(Boolean));
     }
 
     /* ---------------------------------------------------------- 历史列表 / 抽屉 */
@@ -1725,6 +1860,8 @@ window.__ModuleLoader__.load({
       const [transcribe, setTranscribe] = useState(EMPTY_TRANSCRIBE);
       const [mindmap, setMindmap] = useState(EMPTY_MINDMAP);
       const [mmExpanded, setMmExpanded] = useState({});
+      const [storyboard, setStoryboard] = useState(EMPTY_STORYBOARD);
+      const [sbDescribe, setSbDescribe] = useState(false);
 
       const mounted = useRef(true);
       /** 同一时刻只允许一条在途请求（解析或流式），切视频 / 新请求前 abort。 */
@@ -1920,6 +2057,7 @@ window.__ModuleLoader__.load({
           ? current.map((message) => (message.streaming ? { ...message, streaming: false, phase: '' } : message))
           : current));
         setTranscribe((current) => (current.loading ? { ...current, loading: false, phase: '', percent: null } : current));
+        setStoryboard((current) => (current.loading ? { ...current, loading: false, phase: '', percent: null } : current));
       }, [abortActive]);
 
       const resetPanels = useCallback(() => {
@@ -1933,6 +2071,8 @@ window.__ModuleLoader__.load({
         setAskBusy(false);
         askBusyRef.current = false;
         setTranscribe(EMPTY_TRANSCRIBE);
+        setStoryboard(EMPTY_STORYBOARD);
+        setSbDescribe(false);
       }, []);
 
       /** 把 host 返回的 doc.analysis 回填到面板状态（summary / chapters / mindmap / chat）。 */
@@ -2244,6 +2384,121 @@ window.__ModuleLoader__.load({
       const expandMindmapAll = useCallback(() => { setMmExpanded(allMindmapPaths(mindmap.data)); }, [mindmap.data]);
       const collapseMindmapAll = useCallback(() => { setMmExpanded({}); }, []);
 
+      /* ---- 分镜：GET /storyboard 读缓存，没有缓存再 POST SSE 生成 ---- */
+
+      /**
+       * 读/生成分镜：force=true 跳过缓存直接重新生成，describe=true 让视觉模型给每格补一句描述。
+       * 生成中不重复触发；切走页签不打断，只有取消按钮或切换视频才 abort。
+       */
+      const loadStoryboard = useCallback(async (video, options) => {
+        const target = video ?? docRef.current;
+        const opts = options || {};
+        if (!target || !target.docId || !mounted.current || storyboard.loading) return;
+        interruptActive();
+        const controller = new AbortController();
+        active.current = { controller, kind: 'storyboard' };
+        const previous = storyboard.data;
+        setStoryboard({ data: previous, loading: true, phase: '正在读取分镜…', percent: null, error: '', code: '' });
+        const live = () => active.current && active.current.controller === controller && mounted.current;
+        try {
+          if (!opts.force) {
+            let cached = null;
+            try { cached = await call('storyboard', { docId: target.docId }, { signal: controller.signal }); }
+            catch (caught) {
+              if (caught && caught.name === 'AbortError') throw caught;
+              cached = null; // 读缓存失败不致命：继续走生成
+            }
+            if (!live()) return;
+            if (cached && Array.isArray(cached.cells) && cached.cells.length) {
+              setStoryboard({ data: cached, loading: false, phase: '', percent: null, error: '', code: '' });
+              return;
+            }
+          }
+          setStoryboard((current) => ({ ...current, loading: true, phase: '正在生成分镜…', percent: null, error: '', code: '' }));
+          let finished = false;
+          await streamSSE('storyboard', {
+            docId: target.docId,
+            url: target.url,
+            force: Boolean(opts.force),
+            describe: Boolean(opts.describe),
+          }, {
+            signal: controller.signal,
+            onEvent: (event) => {
+              if (!live()) return 'stop';
+              const type = event && event.type;
+              if (type === 'phase') {
+                setStoryboard((current) => ({ ...current, phase: String(event.text || '正在生成分镜…') }));
+              } else if (type === 'progress') {
+                const stage = storyboardStageText(event.stage);
+                const raw = event.percent;
+                const value = raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
+                setStoryboard((current) => ({
+                  ...current,
+                  phase: stage || current.phase,
+                  percent: Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null,
+                }));
+              } else if (type === 'done') {
+                finished = true;
+                const data = event.storyboard && Array.isArray(event.storyboard.cells) ? event.storyboard : null;
+                setStoryboard({
+                  data,
+                  loading: false,
+                  phase: '',
+                  percent: null,
+                  error: data ? '' : '分镜生成完了，但没有拿到可用的分镜数据。',
+                  code: '',
+                });
+                if (data) {
+                  const count = data.frames || data.cells.length;
+                  showToast(`分镜已生成 · ${count} 格${data.described ? ' · 含描述' : ''}`);
+                }
+                return 'stop';
+              } else if (type === 'error') {
+                finished = true;
+                setStoryboard({
+                  data: previous,
+                  loading: false,
+                  phase: '',
+                  percent: null,
+                  error: friendlyStoryboardError({ code: event.code, message: event.message }),
+                  code: String(event.code || ''),
+                });
+                return 'stop';
+              }
+              return undefined;
+            },
+          });
+          if (!finished && live()) {
+            setStoryboard((current) => (current.loading
+              ? { ...current, loading: false, phase: '', error: '连接中断了，没有拿到分镜图，请重试。' }
+              : current));
+          }
+        } catch (caught) {
+          if (caught && caught.name === 'AbortError') {
+            if (live()) setStoryboard((current) => ({ ...current, loading: false, phase: '', percent: null }));
+            return;
+          }
+          if (live()) {
+            setStoryboard({
+              data: previous,
+              loading: false,
+              phase: '',
+              percent: null,
+              error: friendlyStoryboardError(caught),
+              code: String((caught && caught.code) || ''),
+            });
+          }
+        } finally {
+          if (active.current && active.current.controller === controller) active.current = null;
+        }
+      }, [storyboard.loading, storyboard.data, interruptActive, showToast]);
+
+      const cancelStoryboard = useCallback(() => {
+        abortActive();
+        setStoryboard((current) => ({ ...current, loading: false, phase: '', percent: null }));
+        showToast('已取消生成分镜');
+      }, [abortActive, showToast]);
+
       /* ---- 无字幕自动转写：asr 开启且 autoTranscribe 为真时自动跑一次（同一视频只触发一次） ---- */
 
       useEffect(() => {
@@ -2264,6 +2519,13 @@ window.__ModuleLoader__.load({
         if (tab !== 'mindmap' || !doc || mindmap.loading || mindmap.data || mindmap.error) return;
         void loadMindmap(doc, false);
       }, [tab, doc, mindmap.loading, mindmap.data, mindmap.error, loadMindmap]);
+
+      /* ---- 分镜懒加载：切到该页签、还没有数据/错误时才读缓存（无缓存时 loadStoryboard 会继续生成） ---- */
+
+      useEffect(() => {
+        if (tab !== 'storyboard' || !doc || storyboard.loading || storyboard.data || storyboard.error) return;
+        void loadStoryboard(doc, { describe: sbDescribe });
+      }, [tab, doc, storyboard.loading, storyboard.data, storyboard.error, sbDescribe, loadStoryboard]);
 
       /* ---- 解析：/resolve 可 aborts，切换视频时中断上一条 ---- */
 
@@ -2296,6 +2558,8 @@ window.__ModuleLoader__.load({
           pendingSeek.current = null;
           setMindmap(EMPTY_MINDMAP);
           setMmExpanded({});
+          setStoryboard(EMPTY_STORYBOARD);
+          setSbDescribe(false);
           // host 0.4.0：doc 可能带分析缓存（summary / chapters / mindmap / chat），有缓存就直接回填。
           const cache = readCachedAnalysis(video);
           if (cache) {
@@ -2482,6 +2746,14 @@ window.__ModuleLoader__.load({
             onToggle: toggleMindmapNode,
             onGoTranscript: () => { void runTranscribe(doc); },
           });
+        } else if (tab === 'storyboard') {
+          tabBody = h(StoryboardTab, {
+            doc, storyboard, describe: sbDescribe,
+            onDescribe: (value) => setSbDescribe(Boolean(value)),
+            onGenerate: () => { void loadStoryboard(doc, { force: Boolean(storyboard.data), describe: sbDescribe }); },
+            onCancel: cancelStoryboard,
+            onSeek: seekTo,
+          });
         }
       }
 
@@ -2500,6 +2772,8 @@ window.__ModuleLoader__.load({
         setTranscribe(EMPTY_TRANSCRIBE);
         setMindmap(EMPTY_MINDMAP);
         setMmExpanded({});
+        setStoryboard(EMPTY_STORYBOARD);
+        setSbDescribe(false);
         setChat([]);
         chatRef.current = [];
         setAskInput('');
@@ -2848,6 +3122,22 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-mm-branch-7{--dvv-mm-accent:var(--dsw-alias-state-error-primary)}
 .dvv-mm-error{flex-direction:column;align-items:flex-start;gap:8px}
 
+/* 分镜页签：整张分镜图 + 每格时间戳覆盖层 */
+.dvv-sb-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}
+.dvv-sb-spacer{flex:1}
+.dvv-sb-meta{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+.dvv-sb-check{display:flex;align-items:center;gap:4px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);cursor:pointer}
+.dvv-sb-progress{display:flex;flex-direction:column;gap:8px;padding:12px 0}
+.dvv-sb-wrap{display:flex;flex-direction:column;gap:8px}
+.dvv-sb{position:relative;width:100%;border-radius:12px;overflow:hidden;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
+.dvv-sb-img{display:block;width:100%;height:auto}
+.dvv-sb-cell{position:absolute;appearance:none;margin:0;padding:0;border:0;background:transparent;cursor:pointer;outline:none}
+.dvv-sb-cell:hover{box-shadow:inset 0 0 0 2px var(--dsw-alias-brand-primary)}
+.dvv-sb-cell:focus-visible{box-shadow:inset 0 0 0 2px var(--dsw-alias-brand-primary)}
+.dvv-sb-clock{position:absolute;left:5px;top:5px;font-size:10px;line-height:16px;padding:0 5px;border-radius:5px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);font-variant-numeric:tabular-nums;pointer-events:none}
+.dvv-sb-note{font-size:11px;line-height:17px;color:var(--dsw-alias-label-secondary)}
+.dvv-sb-broken{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:220px;padding:24px;border:1px dashed var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);text-align:center}
+.dvv-sb-broken-title{font-size:13px;line-height:20px;font-weight:600;color:var(--dsw-alias-label-primary)}
 @media (max-width:979px){
   /* 单列：播放器 → 页签（含字幕提示条） → 追问对话框，整页滚动。
      两栏用 display:contents 摊平，再靠 order 重排。 */

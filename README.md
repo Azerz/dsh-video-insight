@@ -7,7 +7,7 @@
 
 ![dsh-video-insight](icon.svg)
 
-DeepSeek Harness 的视频插件库里的「第二块屏」：左侧栏「知乎浏览」下面是**视频解析**入口，点开是一整页面板：**左栏**上方是内嵌播放器、下方是追问对话框，**右栏**是总结 / 章节 / 原文 / 思维导图。粘贴一条 YouTube 或哔哩哔哩链接，插件自己把字幕抓下来，用你当前的默认模型生成内容；点时间戳直接跳到对应位置，边看边读。左上角「← 返回」：在视频详情页点它回到插件首页（大输入框 + 最近分析），已经在首页时再点才回到会话界面。
+DeepSeek Harness 的视频插件库里的「第二块屏」：左侧栏「知乎浏览」下面是**视频解析**入口，点开是一整页面板：**左栏**上方是内嵌播放器、下方是追问对话框，**右栏**是总结 / 章节 / 原文 / 思维导图 / 分镜。粘贴一条 YouTube 或哔哩哔哩链接，插件自己把字幕抓下来，用你当前的默认模型生成内容；点时间戳直接跳到对应位置，边看边读。左上角「← 返回」：在视频详情页点它回到插件首页（大输入框 + 最近分析），已经在首页时再点才回到会话界面。
 
 没有字幕的视频也不至于没得看：可以用**本机 Whisper / SenseVoice 转写**兜底（可选引擎、线程、只转前 N 秒），音频全程不出这台电脑；**纯无声/纯画面视频**（没有配音也没有字幕）还能抽帧做**画面文字识别（OCR）**，甚至直接把画面交给**视觉模型**描述场景、人物和动作（「画面理解」，会用到支持图片输入的模型），把画面内容变成带时间戳的文字稿，摘要仍用你 profile 里的模型。
 
@@ -29,6 +29,7 @@ DeepSeek Harness 的视频插件库里的「第二块屏」：左侧栏「知乎
 | 章节 | 模型按时轴切 6–12 章（`POST /chapters` 只吐 JSON）；失败自动回落视频自带的章节 / 分 P |
 | 原文 | 字幕逐段列表（`[mm:ss] 文本`），可搜索过滤、点单条复制、一键复制全文 |
 | 思维导图 | 模型把字幕整理成 3 层树状大纲（`GET /mindmap`，带缓存），面板渲染成 **SVG 图形化横向树**（节点卡片 + 贝塞尔连线、按分支配色），点节点折叠/展开，支持全部展开/收起、缩放、重新生成 |
+| 分镜 | 按镜头切点抽帧、拼成一张**分镜拼图**（`POST /storyboard`，默认 24 格按 3 列排；行数按帧数自动），每格左上角标时间；点任意一格跳到那个画面并继续播放。可选「附画面描述」让视觉模型给每格写一句描述（悬停格子可见）。图片按视频缓存在 `~/.dsh/video-storyboards/`，切回页签秒开 |
 | 追问 | 左栏下方对话框：基于转写稿的 RAG 多轮问答（检索相关段落后再回答），回答带 `[mm:ss]`，下方「依据」chip 可点击跳转；对话按视频缓存。空态先给固定三句，再给 **AI 根据本视频总结生成的 3 条建议追问**（虚线 chip，点一下直接问） |
 | 设置 | 填 B 站 Cookie（SESSDATA），保存到 `~/.dsh/video-credentials.json`（0600）；可清除 |
 | 历史 | 最近 20 条解析/分析记录，存在 `~/.dsh/video-history.json`（跨浏览器、跨重启都在），点击重新打开，可单条删除或清空 |
@@ -155,6 +156,10 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | POST | `/dsh-video/api/transcribe` | SSE：`{url?/docId?, force?}`，帧 `phase` / `progress{percent,stage}` / `done{docId,transcript,cached?}` / `error{code,message}`；无语音时自动兜底 OCR / 画面理解（stage 含 `vision`） |
 | POST | `/dsh-video/api/analyze` | SSE：`{mode:'summary'\|'ask', url?/docId?, question?, history?}`，帧 `phase` / `delta` / `done` / `error` |
 | POST | `/dsh-video/api/chapters` | `{url?/docId?}` → `{ok,value:{chapters:[{start,title,gist}],duration}}` |
+| GET | `/dsh-video/api/storyboard?docId=` | 取缓存的分镜：`{ok,value:{docId,url,title,platform,duration,generatedAt,tookMs,frameSampling,cuts,frames,cols,rows,cellWidth,cellHeight,described,cells:[{index,row,col,seconds,description?}]}}\|null` |
+| GET | `/dsh-video/api/storyboard/image?docId=` | 分镜拼图 `image/jpeg`（`no-store`）；没生成过返回 `{code:'not-found'}` |
+| POST | `/dsh-video/api/storyboard` | SSE：`{docId?/url?, frames?:24, cols?:3, describe?:boolean, force?:boolean}`，帧 `phase` / `progress{stage:download\|scan\|frames,percent}` / `done{cached,docId,storyboard}` / `error{code,message}` |
+| POST | `/dsh-video/api/storyboard/clear` | `{docId}` 删掉该视频的分镜（json + jpg） |
 | GET | `/dsh-video/api/mindmap?docId=&force=1` | 字幕 → `{ok,value:{docId,mindmap:{title,children[]},source:'llm'\|'cache',generatedAt,cached}}`；无字幕 `code:'no-transcript'`；结果写分析缓存 |
 | GET | `/dsh-video/api/player?platform=&id=&page=&start=` | 播放器外壳 HTML：桌面端自定义协议下让 YouTube 能正常内嵌播放，面板 iframe 指向它 |
 | POST | `/dsh-video/api/credentials` | `{bilibiliCookie}` 保存；传空串即清除 |
@@ -222,7 +227,14 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 - 画面文字识别：只在 macOS 可用（依赖系统 Vision 框架）；识别质量取决于画面文字是否清晰，滚动弹幕/花哨字体容易出错；抽帧默认按镜头切点（找不到切点时均匀铺满），因此长视频的覆盖密度取决于镜头数量而不是固定间隔。
 - 画面理解：需要当前（或设置里指定的）模型声明 `image` 输入能力；会把拼好的分镜图发给模型（与 OCR 的本机离线不同）；默认一张图装 9–24 格，所以按「张」而不是按「帧」计费（比逐帧省很多），单次生成仍要 15–30s；画面里既没字也没可描述内容时仍会得到 `asr-empty`。
 - 本地转写：Whisper 首次加载 574MB 模型约 6–12 秒（每次调用固定成本，长视频占比可忽略）；SenseVoice 段级时间戳是按标点聚合的近似值；`threads: 0` 交给引擎自己决定（whisper.cpp 默认 4）。
+- 分镜：一个视频只保留一张分镜图（最多 24 格），重新生成要重新下 480p + 跑一遍切点扫描（10 分钟片子约 10–20 秒）；「附画面描述」会调用视觉模型，图片会离开本机。
 - 只支持单条链接，不做播放列表 / 合集递归。
+
+## 开发与自测
+
+```bash
+node test/client.test.mjs   # 面板客户端自测（无第三方依赖；自带 fake DOM / fetch / SSE）
+```
 
 ## 开源
 
