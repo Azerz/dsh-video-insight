@@ -319,6 +319,17 @@ window.__ModuleLoader__.load({
       return null;
     }
 
+    /**
+     * 章节缩略图地址：Host 按 docId + 秒数截图（320×180 等比，w=160 返回 64×36 档）。
+     * 只有解析缓存里存在的 docId 才有图，未命中直接 404；客户端按需懒加载，绝不一次请求全部。
+     */
+    function chapterThumbSrc(doc, start) {
+      if (!doc) return null;
+      const seconds = Math.max(0, Math.floor(Number(start) || 0));
+      const path = `/dsh-video/api/thumb?docId=${encodeURIComponent(String(doc.docId || ''))}&seconds=${seconds}&w=160`;
+      return `${playerHostBase()}${path}`;
+    }
+
     function readPlayerCollapsed() {
       try { return window.localStorage.getItem(PLAYER_KEY) === '1'; }
       catch { return false; }
@@ -958,19 +969,34 @@ window.__ModuleLoader__.load({
 
     /* ------------------------------------------------------------------ 章节 */
 
-    function ChapterRow({ item, index, open, onToggle, onSeek, current }) {
+    function ChapterRow({ item, index, open, onToggle, onSeek, current, thumbSrc }) {
       const start = item.start !== null && item.start !== undefined && Number.isFinite(Number(item.start)) ? Number(item.start) : null;
       const timeLabel = start !== null ? `[${fmtTime(start)}]` : `P${item.pageIndex ?? index + 1}`;
+      const [thumbBroken, setThumbBroken] = useState(false);
       const activate = () => {
         onToggle(open ? -1 : index);
         if (start !== null) onSeek(start); // 章节时间戳同时跳转播放位置
       };
+      // 分 P 章节（start=null）没有缩略图；加载失败时隐藏 img，只留占位底色，不显示破图标。
+      const thumb = start !== null && thumbSrc
+        ? h('span', { key: 'thumb', className: 'dvv-ch-thumb' },
+            thumbBroken ? null : h('img', {
+              key: 'img', className: 'dvv-ch-thumb-img', src: thumbSrc, alt: '',
+              width: 64, height: 36, loading: 'lazy', decoding: 'async',
+              onError: () => setThumbBroken(true),
+              onClick: (event) => {
+                if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+                activate();
+              },
+            }))
+        : null;
       return h('div', { className: 'dvv-ch', 'data-current': current ? 'true' : 'false' }, [
         h('div', {
           key: 'head', className: 'dvv-ch-head', role: 'button', tabIndex: 0,
           onClick: activate,
           onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } },
         }, [
+          thumb,
           h('span', { key: 't', className: 'dvv-ts' }, timeLabel),
           h('span', { key: 'title', className: 'dvv-ch-title' }, item.title || '(未命名章节)'),
           h('span', { key: 'chev', className: 'dvv-ch-chev' }, open ? '▴' : '▾'),
@@ -979,7 +1005,7 @@ window.__ModuleLoader__.load({
       ]);
     }
 
-    function ChaptersTab({ chapters, openIndex, onToggle, onRetry, onSeek, currentSeconds }) {
+    function ChaptersTab({ chapters, openIndex, onToggle, onRetry, onSeek, currentSeconds, doc, thumbLimit }) {
       if (chapters.loading) {
         return h('div', { className: 'dvv-tabpane' }, h('div', { className: 'dvv-chlist' },
           [0, 1, 2, 3].map((index) => h('div', { key: index, className: 'dvv-skel' }))));
@@ -1001,9 +1027,15 @@ window.__ModuleLoader__.load({
           }
         });
       }
+      const thumbOf = (item, index) => {
+        if (!doc || index >= thumbLimit) return null; // 只给已排到号的章节挂 src（懒加载节流）
+        const start = Number(item && item.start);
+        return Number.isFinite(start) ? chapterThumbSrc(doc, start) : null;
+      };
       if (items.length) {
         parts.push(h('div', { key: 'list', className: 'dvv-chlist' }, items.map((item, index) => h(ChapterRow, {
           key: `ch-${index}`, item, index, open: openIndex === index, onToggle, onSeek, current: currentIndex === index,
+          thumbSrc: thumbOf(item, index),
         }))));
       } else {
         parts.push(h('div', { key: 'empty', className: 'dvv-notice' }, [
@@ -2119,6 +2151,7 @@ window.__ModuleLoader__.load({
       const [summary, setSummary] = useState(EMPTY_SUMMARY);
       const [chapters, setChapters] = useState(EMPTY_CHAPTERS);
       const [openChapter, setOpenChapter] = useState(-1);
+      const [thumbLimit, setThumbLimit] = useState(0);
       const [segQuery, setSegQuery] = useState('');
       const [segAll, setSegAll] = useState(false);
       const [translateOn, setTranslateOn] = useState(false);
@@ -2403,6 +2436,7 @@ window.__ModuleLoader__.load({
         setSummary(EMPTY_SUMMARY);
         setChapters(EMPTY_CHAPTERS);
         setOpenChapter(-1);
+        setThumbLimit(0);
         setSegQuery('');
         setSegAll(false);
         setTranslateOn(false);
@@ -3084,6 +3118,7 @@ window.__ModuleLoader__.load({
           setStoryboard(EMPTY_STORYBOARD);
           setSbDescribe(false);
           setBookmarks(EMPTY_BOOKMARKS);
+          setThumbLimit(0);
           // host 0.4.0：doc 可能带分析缓存（summary / chapters / mindmap / chat），有缓存就直接回填。
           const cache = readCachedAnalysis(video);
           if (cache) {
@@ -3204,6 +3239,19 @@ window.__ModuleLoader__.load({
         void loadChapters(doc);
       }, [tab, doc, chapters.items, chapters.loading, loadChapters]);
 
+      // 章节缩略图懒加载：切到章节页签后先挂前 3 张，其余每 120ms 排一张，避免一次打满 Host。
+      useEffect(() => {
+        if (tab !== 'chapters' || !doc) return undefined;
+        const items = Array.isArray(chapters.items) ? chapters.items : [];
+        if (!items.length || thumbLimit >= items.length) return undefined;
+        if (thumbLimit === 0) {
+          setThumbLimit(Math.min(3, items.length));
+          return undefined;
+        }
+        const timer = setTimeout(() => setThumbLimit((current) => Math.min(items.length, current + 1)), 120);
+        return () => { try { clearTimeout(timer); } catch { /* ignore */ } };
+      }, [tab, doc, chapters.items, thumbLimit]);
+
       useEffect(() => {
         if (!overlay) return undefined;
         const onKeyDown = (event) => { if (event && event.key === 'Escape') setOverlay(''); };
@@ -3255,7 +3303,7 @@ window.__ModuleLoader__.load({
           });
         } else if (tab === 'chapters') {
           tabBody = h(ChaptersTab, {
-            chapters, openIndex: openChapter, currentSeconds,
+            chapters, openIndex: openChapter, currentSeconds, doc, thumbLimit,
             onToggle: (index) => setOpenChapter(index),
             onSeek: seekTo,
             onRetry: () => { void loadChapters(doc); },
@@ -3320,6 +3368,7 @@ window.__ModuleLoader__.load({
         setError('');
         setSummary(EMPTY_SUMMARY);
         setChapters(EMPTY_CHAPTERS);
+        setThumbLimit(0);
         setTranscribe(EMPTY_TRANSCRIBE);
         setMindmap(EMPTY_MINDMAP);
         setMmExpanded({});
@@ -3541,6 +3590,9 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-ch{border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.1));border-radius:10px;background:var(--dsw-alias-bg-layer-1,transparent);overflow:hidden}
 .dvv-ch-head{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer}
 .dvv-ch-head:hover{background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.1))}
+/* 章节缩略图：Host /thumb 懒加载；失败隐藏 img 只留占位底色 */
+.dvv-ch-thumb{flex:none;width:64px;height:36px;border-radius:6px;overflow:hidden;background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.16));border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.1))}
+.dvv-ch-thumb-img{display:block;width:100%;height:100%;object-fit:cover}
 .dvv-ch[data-current="true"]{border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.12));box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}
 .dvv-ch-title{flex:1;min-width:0;font-size:13px;line-height:20px;font-weight:550}
 .dvv-ch-chev{flex:none;font-size:11px;color:var(--dsw-alias-label-secondary)}

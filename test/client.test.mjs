@@ -997,6 +997,30 @@ tree = await settle();
 chCurrent = allByClass(tree, 'dvv-ch').filter((node) => node.props['data-current'] === 'true');
 check('超出末章 start 时高亮最后一章', chCurrent.length === 1 && nodeText(chCurrent[0]).includes('核心论点'));
 
+/* ---------------------------------------------------------------- 章节缩略图（task-18） */
+
+let chThumbs = allByClass(tree, 'dvv-ch-thumb-img');
+check('章节缩略图渲染两张', chThumbs.length === 2);
+const thumb0src = String((chThumbs[0] || {}).props?.src || '');
+const thumb1src = String((chThumbs[1] || {}).props?.src || '');
+checkIncludes('缩略图 src 带 docId', thumb0src, 'docId=bilibili%3ABV1xx411c7mD');
+check('缩略图 src 带秒数与宽度', thumb0src.includes('seconds=0&w=160') && thumb1src.includes('seconds=62&w=160'));
+check('缩略图 use lazy loading + async decoding',
+  (chThumbs[0] || {}).props?.loading === 'lazy' && (chThumbs[0] || {}).props?.decoding === 'async');
+const thumbFrame = allByTag(tree, 'iframe')[0];
+const seekCountBefore = thumbFrame ? thumbFrame.contentWindow.messages.length : 0;
+check('点击缩略图等同点章节行', Boolean(chThumbs[1]) && click(chThumbs[1]));
+tree = await settle();
+const thumbFrame2 = allByTag(tree, 'iframe')[0];
+check('点击缩略图把 62s 发给播放器',
+  Boolean(thumbFrame2) && thumbFrame2.contentWindow.messages.length > seekCountBefore
+  && thumbFrame2.contentWindow.messages.some((msg) => msg && msg.seconds === 62));
+chThumbs = allByClass(tree, 'dvv-ch-thumb-img');
+if (chThumbs[0] && typeof chThumbs[0].props.onError === 'function') chThumbs[0].props.onError({});
+tree = await settle();
+check('缩略图加载失败后隐藏 img', allByClass(tree, 'dvv-ch-thumb-img').length === 1);
+check('失败后保留占位底色', allByClass(tree, 'dvv-ch-thumb').length === 2);
+
 /* ---------------------------------------------------------------- 原文页 */
 
 clickText(tree, '原文');
@@ -1271,6 +1295,11 @@ clickText(tree, '章节');
 tree = await settle();
 checkIncludes('缓存章节回填', nodeText(tree), '缓存章节一');
 check('缓存章节不重复请求', callsOf('chapters').length === chaptersBefore);
+const cacheThumb = allByClass(tree, 'dvv-ch-thumb-img')[0];
+check('切换视频后缩略图用新 docId',
+  Boolean(cacheThumb) && String(cacheThumb.props.src).includes('docId=bilibili%3ABVcache1'));
+check('切换视频后不再渲染旧缩略图',
+  Boolean(cacheThumb) && !String(cacheThumb.props.src).includes('BV1xx411c7mD'));
 clickText(tree, '思维导图');
 tree = await settle();
 checkIncludes('缓存导图回填', nodeText(tree), '缓存分支');
@@ -1396,6 +1425,34 @@ routes.bookmarks = savedBookmarksRoute;
 clickText(tree, '重试');
 tree = await settle(20);
 checkIncludes('重试后回到空态', nodeText(tree), '还没有收藏的片段');
+
+/* ---------------------------------------------------------------- 分 P 章节无缩略图 */
+
+const savedResolveRoute = routes.resolve;
+const savedChaptersRoute = routes.chapters;
+routes.resolve = () => ({
+  ok: true,
+  value: makeDoc({
+    docId: 'bilibili:BVpages1',
+    id: 'BVpages1',
+    officialChapters: [],
+    pages: [{ index: 1, title: 'P1 开场', duration: 60 }, { index: 2, title: 'P2 进阶', duration: 120 }],
+  }),
+});
+routes.chapters = () => ({ ok: false, code: 'internal', error: 'boom' });
+let pageInput = byClass(tree, 'dvv-input');
+change(pageInput, 'https://www.bilibili.com/video/BVpages1');
+tree = await settle();
+pageInput = byClass(tree, 'dvv-input');
+keydown(pageInput, 'Enter');
+tree = await settle(40);
+clickText(tree, '章节');
+tree = await settle(30);
+checkIncludes('分 P 回落展示 P1', nodeText(tree), 'P1 开场');
+checkIncludes('分 P 回落有提示', nodeText(tree), '分 P');
+check('start=null 的分 P 章节不渲染缩略图', allByClass(tree, 'dvv-ch-thumb-img').length === 0);
+routes.resolve = savedResolveRoute;
+routes.chapters = savedChaptersRoute;
 
 /* ---------------------------------------------------------------- 错误与返回 */
 
