@@ -41,6 +41,10 @@ window.__ModuleLoader__.load({
     const VISION_MODEL_PLACEHOLDER = 'opencode-go/deepseek-v4.1-flash';
     /** 分镜：host 生成的分镜拼图（GET 读缓存 / POST SSE 生成），格子带秒数可 seek。 */
     const EMPTY_STORYBOARD = { data: null, loading: false, phase: '', percent: null, error: '', code: '' };
+    const EMPTY_KEYFRAMES = { docId: '', loading: false, loaded: false, error: '', code: '', items: [] };
+    const KEYFRAME_COUNT = 16;
+    const KEYFRAME_INITIAL = 4;
+    const KEYFRAME_STEP_MS = 120;
     const EMPTY_BOOKMARKS = { loading: false, loaded: false, error: '', items: [] };
     const STORYBOARD_STAGE_LABEL = { download: '正在下载视频…', scan: '正在扫描镜头…', frames: '正在抽取画面…' };
 
@@ -66,7 +70,7 @@ window.__ModuleLoader__.load({
       zh: '中文', 'zh-cn': '中文', 'zh-hans': '中文', 'zh-tw': '繁體中文', 'zh-hant': '繁體中文',
       en: 'English', 'en-us': 'English', 'en-gb': 'English', ja: '日本語', ko: '한국어',
     };
-    const TABS = [['summary', '总结'], ['chapters', '章节'], ['transcript', '原文'], ['bookmarks', '片段'], ['storyboard', '分镜'], ['mindmap', '思维导图']];
+    const TABS = [['summary', '总结'], ['chapters', '章节'], ['transcript', '原文'], ['bookmarks', '片段'], ['storyboard', '分镜'], ['keyframes', '关键画面'], ['mindmap', '思维导图']];
     const ASK_EXAMPLES = ['这个视频最核心的论点是什么？', '作者的观点有哪些可疑之处？', '用 5 句话讲给完全不懂的人听'];
 
     function platformMeta(platform) {
@@ -1753,7 +1757,34 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'dvv-tabpane dvv-sb-tab' }, [toolbar, body].filter(Boolean));
     }
 
-    /* ---------------------------------------------------------- 历史列表 / 抽屉 */
+    /* ---- 关键画面（第 6 步）---- */
+    function keyframeThumbSrc(doc, seconds) { return doc ? `${playerHostBase()}/dsh-video/api/thumb?docId=${encodeURIComponent(String(doc.docId || ''))}&seconds=${Math.max(0, Math.floor(Number(seconds) || 0))}&w=320` : null; }
+    function friendlyKeyframesError(error) {
+      const code = String((error && error.code) || ''), message = String((error && error.message) || error || '');
+      if (code === 'not-found' || /not-found|not found|没有|找不到/i.test(message)) return '还没有这个视频的关键画面：先重新解析一次视频，再来看关键画面。';
+      return `整理关键画面失败：${message || '未知错误'}`;
+    }
+    function KeyframeCard({ doc, item, onSeek }) {
+      const [broken, setBroken] = useState(false);
+      const seconds = Math.max(0, Math.floor(Number(item && item.seconds) || 0)), label = String((item && item.label) || ''), clock = formatClock(seconds);
+      return h('button', { type: 'button', className: 'dvv-kf-card', 'data-seconds': String(seconds), title: label ? `${label} · ${clock}` : `跳到 ${clock}`, onClick: () => onSeek(seconds) }, [
+        h('div', { key: 't', className: 'dvv-kf-thumb' }, [broken ? h('div', { key: 'p', className: 'dvv-kf-ph', 'aria-hidden': 'true' }) : h('img', { key: 'i', className: 'dvv-kf-img', src: keyframeThumbSrc(doc, seconds), alt: label || clock, loading: 'lazy', onError: () => setBroken(true) }), h('span', { key: 'c', className: 'dvv-kf-time' }, clock)]),
+        label ? h('div', { key: 'l', className: 'dvv-kf-label', title: label }, label) : null,
+      ].filter(Boolean));
+    }
+    function KeyframesTab({ doc, keyframes, shown, onSeek, onOpenStoryboard, onRetry }) {
+      if (!doc) return h('div', { className: 'dvv-tabpane dvv-kf-tab' }, h('div', { className: 'dvv-empty-note' }, '先解析一个视频，再来看它的关键画面。'));
+      const items = Array.isArray(keyframes.items) ? keyframes.items : [], visible = items.slice(0, Math.max(0, Math.min(Number(shown) || 0, items.length)));
+      const bar = h('div', { key: 'bar', className: 'dvv-kf-bar' }, [h('span', { key: 't', className: 'dvv-label' }, '关键画面'), items.length ? h('span', { key: 'c', className: 'dvv-mini' }, `${items.length} 张`) : null, h('span', { key: 's', className: 'dvv-spacer' }), onOpenStoryboard ? h('button', { key: 'sb', type: 'button', className: 'dvv-btn dvv-link-btn', onClick: onOpenStoryboard }, '看完整分镜') : null].filter(Boolean));
+      const body = keyframes.loading
+        ? h('div', { key: 'l', className: 'dvv-loading-block' }, [h('span', { key: 's', className: 'dvv-spinner' }), '正在整理关键画面…'])
+        : keyframes.error ? h('div', { key: 'e', className: 'dvv-error' }, [h('span', { key: 't' }, keyframes.error), h('button', { key: 'r', type: 'button', className: 'dvv-btn', onClick: onRetry }, '重试')])
+        : items.length ? h('div', { key: 'g', className: 'dvv-kf-grid' }, visible.map((item, index) => h(KeyframeCard, { key: `${item.seconds}-${index}`, doc, item, onSeek })))
+        : h('div', { key: 'n', className: 'dvv-empty-note' }, '这个视频没有可用的关键画面。');
+      return h('div', { className: 'dvv-tabpane dvv-kf-tab' }, [bar, body]);
+    }
+
+    /* ---------------------------------------------------------- 历史列表 / 抽屉 */    /* ---------------------------------------------------------- 历史列表 / 抽屉 */
 
     /** 封面缩略图：没有 cover 或加载失败时用纯色占位。 */
     function HistoryCover({ src, alt }) {
@@ -2227,6 +2258,7 @@ window.__ModuleLoader__.load({
       const [mmExpanded, setMmExpanded] = useState({});
       const [storyboard, setStoryboard] = useState(EMPTY_STORYBOARD);
       const [sbDescribe, setSbDescribe] = useState(false);
+      const [keyframes, setKeyframes] = useState(EMPTY_KEYFRAMES), [kfShown, setKfShown] = useState(0);
       const [bookmarks, setBookmarks] = useState(EMPTY_BOOKMARKS);
 
       const mounted = useRef(true);
@@ -2513,6 +2545,7 @@ window.__ModuleLoader__.load({
         setTranscribe(EMPTY_TRANSCRIBE);
         setStoryboard(EMPTY_STORYBOARD);
         setSbDescribe(false);
+        setKeyframes(EMPTY_KEYFRAMES); setKfShown(0);
         setBookmarks(EMPTY_BOOKMARKS);
       }, []);
 
@@ -2940,6 +2973,24 @@ window.__ModuleLoader__.load({
         showToast('已取消生成分镜');
       }, [abortActive, showToast]);
 
+      /** 关键画面：GET /keyframes，按 docId 缓存；force 用于「重试」。 */
+      const loadKeyframes = useCallback(async (video, force) => {
+        const target = video || docRef.current;
+        if (!target || !target.docId) return;
+        const docId = String(target.docId);
+        if (!force && keyframes.loaded && keyframes.docId === docId) return;
+        setKeyframes({ docId, loading: true, loaded: false, error: '', code: '', items: [] }); setKfShown(0);
+        try {
+          const value = await call('keyframes', { docId, count: KEYFRAME_COUNT });
+          if (!mounted.current || docRef.current !== target) return;
+          const items = (value && Array.isArray(value.items) ? value.items : []).map((item) => ({ seconds: Math.max(0, Math.floor(Number(item && item.seconds) || 0)), label: String((item && item.label) || '') }));
+          setKeyframes({ docId, loading: false, loaded: true, error: '', code: '', items });
+        } catch (caught) {
+          if (!mounted.current || docRef.current !== target) return;
+          setKeyframes({ docId, loading: false, loaded: false, items: [], error: friendlyKeyframesError(caught), code: String((caught && caught.code) || '') });
+        }
+      }, [keyframes.loaded, keyframes.docId, mounted]);
+
       const loadBookmarks = useCallback(async (video) => {
         const target = video || docRef.current;
         if (!target || !target.docId) return;
@@ -3180,6 +3231,7 @@ window.__ModuleLoader__.load({
           setMmExpanded({});
           setStoryboard(EMPTY_STORYBOARD);
           setSbDescribe(false);
+          setKeyframes(EMPTY_KEYFRAMES); setKfShown(0);
           setBookmarks(EMPTY_BOOKMARKS);
           setThumbLimit(0);
           // host 0.4.0：doc 可能带分析缓存（summary / chapters / mindmap / chat），有缓存就直接回填。
@@ -3315,6 +3367,17 @@ window.__ModuleLoader__.load({
         return () => { try { clearTimeout(timer); } catch { /* ignore */ } };
       }, [tab, doc, chapters.items, thumbLimit]);
 
+      // 关键画面：进入页签时按 docId 拉一次，先挂前 4 张，之后每 120ms 递增一张。
+      useEffect(() => {
+        if (tab !== 'keyframes' || !doc) return undefined;
+        if (!keyframes.loading && !keyframes.loaded && !keyframes.error) void loadKeyframes(doc);
+        const items = keyframes.items;
+        if (!items.length || kfShown >= items.length) return undefined;
+        if (kfShown === 0) { setKfShown(Math.min(KEYFRAME_INITIAL, items.length)); return undefined; }
+        const timer = setTimeout(() => setKfShown((current) => Math.min(items.length, current + 1)), KEYFRAME_STEP_MS);
+        return () => { try { clearTimeout(timer); } catch { /* ignore */ } };
+      }, [tab, doc, keyframes.loading, keyframes.loaded, keyframes.error, keyframes.items, kfShown, loadKeyframes]);
+
       useEffect(() => {
         if (!overlay) return undefined;
         const onKeyDown = (event) => { if (event && event.key === 'Escape') setOverlay(''); };
@@ -3416,6 +3479,8 @@ window.__ModuleLoader__.load({
             onCancel: cancelStoryboard,
             onSeek: seekTo,
           });
+        } else if (tab === 'keyframes') {
+          tabBody = h(KeyframesTab, { doc, keyframes, shown: kfShown, onSeek: seekTo, onOpenStoryboard: () => setTab('storyboard'), onRetry: () => { void loadKeyframes(docRef.current, true); } });
         }
       }
 
@@ -3437,6 +3502,7 @@ window.__ModuleLoader__.load({
         setMmExpanded({});
         setStoryboard(EMPTY_STORYBOARD);
         setSbDescribe(false);
+        setKeyframes(EMPTY_KEYFRAMES); setKfShown(0);
         setBookmarks(EMPTY_BOOKMARKS);
         setChat([]);
         chatRef.current = [];
@@ -3845,6 +3911,9 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-seg[data-tr="true"]{flex-wrap:wrap}
 .dvv-seg[data-current="true"]{background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.12));box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}
 .dvv-tr-text{flex:1 0 100%;margin:2px 0 0 56px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);word-break:break-word}
+/* 关键画面（第 6 步） */
+.dvv-kf-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}.dvv-kf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}.dvv-kf-card{display:flex;flex-direction:column;gap:6px;padding:0;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);color:inherit;text-align:left;cursor:pointer;overflow:hidden}.dvv-kf-card:hover{border-color:var(--dsw-alias-brand-primary)}
+.dvv-kf-thumb{position:relative;width:100%;aspect-ratio:16/9;background:var(--dsw-alias-bg-layer-2)}.dvv-kf-ph{width:100%;height:100%;background:var(--dsw-alias-bg-layer-2)}.dvv-kf-img{display:block;width:100%;height:100%;object-fit:cover}.dvv-kf-time{position:absolute;left:6px;bottom:6px;padding:0 5px;border-radius:5px;font-size:11px;line-height:18px;background:var(--dsw-alias-bg-overlay);color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums}.dvv-kf-label{padding:0 8px 8px;font-size:12px;line-height:17px;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
 @media (max-width:979px){
   /* 单列：播放器 → 页签（含字幕提示条） → 追问对话框，整页滚动。
      两栏用 display:contents 摊平，再靠 order 重排。 */

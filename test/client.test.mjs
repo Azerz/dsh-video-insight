@@ -597,6 +597,18 @@ const STORYBOARD_VALUE = {
   ],
 };
 
+const KEYFRAME_ITEMS = [
+  { seconds: 0, label: '开场：什么是第一性原理' },
+  { seconds: 22, label: '问题拆解' },
+  { seconds: 62, label: '拆到最本质的问题' },
+  { seconds: 124, label: '信息密度与注意力' },
+  { seconds: 188, label: '时间成本' },
+  { seconds: 250, label: '为什么需要 AI 编程' },
+  { seconds: 330, label: '错误与调试' },
+  { seconds: 510, label: '创作力的边界' },
+];
+let keyframesMode = 'ok';
+
 const SUMMARY_TEXT = '## 结论\n- 要点一\n- 要点二\n\n**重点**：`代码` 与 [00:08]\n\n### 深入\n1. 第一\n2. 第二';
 
 const SUMMARY_EVENTS = [
@@ -748,6 +760,12 @@ function resetRoutes() {
       return { __sse: STORYBOARD_EVENTS };
     },
     'storyboard/clear': (call) => ({ ok: true, value: { docId: call.body && call.body.docId } }),
+    keyframes: (call) => {
+      const docId = String((call.params && call.params.docId) || '');
+      if (keyframesMode === 'notfound') return { ok: false, code: 'not-found', error: '这个视频还没有解析分镜。' };
+      if (keyframesMode === 'empty') return { ok: true, value: { docId, duration: 754, items: [] } };
+      return { ok: true, value: { docId, duration: 754, items: KEYFRAME_ITEMS } };
+    },
     bookmarks: (call) => {
       const docId = String((call.params && call.params.docId) || '');
       if (docId.startsWith('youtube:')) {
@@ -971,7 +989,8 @@ check('下载 blob 类型为 markdown', sandbox.__blobs.length === 1 && String(s
 check('下载后 revokeObjectURL', sandbox.__revoked.length === 1);
 checkIncludes('页签包含分镜', nodeText(byClass(tree, 'dvv-tabbar')), '分镜');
 checkIncludes('页签包含片段', nodeText(byClass(tree, 'dvv-tabbar')), '片段');
-check('页签共 6 个', allByClass(tree, 'dvv-tab').length === 6);
+check('页签包含关键画面', nodeText(byClass(tree, 'dvv-tabbar')).includes('关键画面'));
+check('页签共 7 个', allByClass(tree, 'dvv-tab').length === 7);
 
 // 点总结里的时间徽标 → seek
 const tsBadge = allByClass(tree, 'dvv-md-ts')[0] || allByClass(tree, 'dvv-ts')[0];
@@ -1182,6 +1201,68 @@ const sbFrame = allByTag(tree, 'iframe')[0];
 check('点击分镜格子发送 seek', Boolean(sbFrame) && sbFrame.contentWindow.messages.some((msg) => msg && msg.seconds === 62));
 const describeBox = byClass(tree, 'dvv-sb-check');
 check('分镜有「附画面描述」开关', Boolean(describeBox) && nodeText(describeBox).includes('附画面描述'));
+
+/* ---------------------------------------------------------------- 关键画面 */
+
+clickText(tree, '关键画面');
+tree = await settle();
+check('切到关键画面 GET /keyframes', callsOf('keyframes').length >= 1);
+const kfCall = lastCallOf('keyframes');
+check('关键画面请求带 docId 与 count=16', Boolean(kfCall) && kfCall.method === 'GET'
+  && kfCall.params.docId === 'bilibili:BV1xx411c7mD' && Number(kfCall.params.count) === 16);
+checkIncludes('关键画面工具条显示张数', nodeText(tree), '8 张');
+check('关键画面首屏只挂 4 张', allByClass(tree, 'dvv-kf-card').length === 4);
+await new Promise((resolve) => setTimeout(resolve, 300));
+tree = await settle();
+check('关键画面懒加载逐步增加', allByClass(tree, 'dvv-kf-card').length > 4);
+for (let round = 0; round < 60 && allByClass(tree, 'dvv-kf-card').length < 8; round += 1) {
+  tree = await settle();
+  await new Promise((resolve) => setTimeout(resolve, 130));
+}
+tree = await settle();
+const kfCards = allByClass(tree, 'dvv-kf-card');
+check('关键画面最终渲染 8 张', kfCards.length === 8);
+checkIncludes('关键画面时间徽标', JSON.stringify(allByClass(tree, 'dvv-kf-time').map(nodeText)), '1:02');
+checkIncludes('关键画面显示章节标题', nodeText(tree), '拆到最本质的问题');
+const kf62Card = kfCards.find((card) => nodeText(card).includes('1:02'));
+const kf62Img = kf62Card ? allByClass(kf62Card, 'dvv-kf-img')[0] : null;
+check('关键画面缩略图指向 host /thumb', Boolean(kf62Img)
+  && String(kf62Img.props.src).includes('/dsh-video/api/thumb?docId=bilibili%3ABV1xx411c7mD&seconds=62&w=320'));
+check('关键画面缩略图懒加载', Boolean(kf62Img) && kf62Img.props.loading === 'lazy');
+check('点击关键画面卡片跳到对应时间', Boolean(kf62Card) && click(kf62Card));
+tree = await settle();
+check('关键画面发送 seek(62)', allByTag(tree, 'iframe')[0].contentWindow.messages.some((msg) => msg && msg.type === 'dsh-video:seek' && msg.seconds === 62));
+clickText(tree, '看完整分镜');
+tree = await settle();
+check('「看完整分镜」切到分镜页', nodeText(tree).includes('打开大图'));
+clickText(tree, '关键画面');
+tree = await settle();
+
+// not-found → 重试
+keyframesMode = 'notfound';
+change(byClass(tree, 'dvv-input'), YT_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-input'), 'Enter');
+tree = await settle(60);
+clickText(tree, '关键画面');
+tree = await settle();
+checkIncludes('关键画面 not-found 提示重新解析', nodeText(tree), '先重新解析');
+check('关键画面错误时有重试按钮', Boolean(buttonByText(tree, '重试')));
+keyframesMode = 'ok';
+clickText(tree, '重试');
+tree = await settle();
+check('关键画面重试后加载完成', allByClass(tree, 'dvv-kf-card').length === 4);
+
+// 空态
+keyframesMode = 'empty';
+change(byClass(tree, 'dvv-input'), BILI_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-input'), 'Enter');
+tree = await settle(60);
+clickText(tree, '关键画面');
+tree = await settle();
+checkIncludes('关键画面空态提示', nodeText(tree), '没有可用的关键画面');
+keyframesMode = 'ok';
 
 /* ---------------------------------------------------------------- 追问 */
 
