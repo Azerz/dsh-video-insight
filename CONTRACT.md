@@ -395,6 +395,8 @@ data: {"type":"error","code":"asr-needs-ytdlp","message":"…"}
 - `POST /translate/clear` body `{docId, lang}` → `{ok,value:{docId,lang,removed}}`。
 - 播放进度同步（「跟随播放」用）：播放器外壳页面每秒向父页面 `postMessage({type:'dsh-video:time', seconds})`（YouTube IFrame API 有 `getCurrentTime()`；B 站 iframe 跨域拿不到，不发）。面板据此把当前播放时间映射到段落并高亮，只在用户点开「原文」页签时才滚动。
 
+- 节点可带可选 `t`（整数秒）：该主题在视频里对应的时间点，由模型按字幕时间戳判断，服务端夹到 `[0, duration]`；面板把 `t` 渲染成可点的时间徽标，点了跳播放位置。没有 `t` 的节点不显示徽标。
+
 ## 工具（agent-facing）
 
 插件在 `ctx.inject(['tools'])` 里注册两个**全局**工具（fiber 不是 agent scope，所以任何会话——包括 qqbot 用 `ctx.agents.create()` 起的 QQ 会话——都看得见）：
