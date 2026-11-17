@@ -1,0 +1,50 @@
+# 更新日志
+
+本项目的版本号与 `package.json` 保持一致；面板是单文件客户端，刷新页面即生效。
+
+## Unreleased（v0.8.0，发布前）
+
+- 新增「关键画面」页签（PPT 模式）：`GET /keyframes` 取章节起点 / 镜头切点做网格缩略图，点一张跳到对应画面。
+- 历史记录上限 20 → 100，支持搜索与星标收藏（`POST /history/favorite`）。
+
+## v0.7.0
+
+- 历史：上限提升到 100，条目新增 `favorite` 字段与收藏接口；重新解析不会冲掉收藏状态。
+- 新增 `GET /keyframes?docId=&count=`：按章节 / 镜头切点 / 均匀三档给出关键画面时间点。
+- 文档：README 首段精简到 100 字内、去掉其他插件锚点；新增「素材缓存」「画面缩略图」「关键画面」契约说明。
+
+## v0.6.4
+
+- 新增「片段」页签：原文每行 ☆ 收藏片段（跳转 / 复制 / 删除 / 清空），按视频存放在 `~/.dsh/video-bookmarks/`。
+- 新增 `GET /thumb` 画面缩略图（320×180，缓存后约 20ms）；章节页签每章配缩略图。
+- 素材复用：低清视频与镜头切点缓存到 `~/.dsh/video-assets/`，转写 / 画面理解 / 分镜 / 章节插图共用，第二次生成分镜从 11.2s 降到 0.4s。
+
+## v0.6.3
+
+- 片段收藏 host 接口：`GET /bookmarks`、`POST /bookmarks/add|remove|clear`（支持直接传视频链接），同起点自动去重。
+- 素材缓存接口：`GET /assets`、`POST /assets/clear`；`captureFrames` 改为复用缓存视频与切点。
+
+## v0.6.2
+
+- 画面理解改为「拼图喂图」：把抽帧拼成一张分镜图再交给视觉模型，输入 token 降低约 86%（24 帧 13,312 → 1,905）、耗时降低约 60%。
+- 新增 `visionPack`（sheet / frames）与 `sheetCols` 配置，拼图失败自动回落逐帧。
+
+## v0.6.1
+
+- 字幕双语翻译：`GET /translate`、`POST /translate`（SSE）、`POST /translate/clear`，按视频缓存。
+- 播放器外壳每秒回传播放进度，原文页签支持「双语 + 跟随播放」高亮。
+- 思维导图节点携带时间点 `t`，面板节点可点击跳转；章节列表高亮当前章节。
+
+## v0.6.0
+
+- 新增「分镜」页签：按镜头切点抽帧拼成一张分镜图（默认 24 格），每格带时间，点格子 seek。
+- 新增 `lib/storyboard.js` 与 `/storyboard`、`/storyboard/image`、`/storyboard/clear`。
+
+## v0.5.0
+
+- 抽帧从固定间隔改为**镜头切点检测**（64×36 rawvideo HSV 差分、暗场增益、尖峰判定），10 分钟视频约 146 个切点、扫描 3.6s；切分失败自动回落均匀抽帧。
+- 新增 `frameSampling` / `cutThreshold` 配置；修复竖屏 B 站视频下载格式选择。
+
+## v0.4.8（npm 上最新已发布版本）
+
+- 新增「画面理解」：抽帧后交给视觉模型描述画面（`frame-vision`），支持 `frameMode: auto | ocr | vision`。
