@@ -13,7 +13,7 @@ const API_BASE = new URL('dsh-video/api/', document.baseURI).toString();
 
 ```json
 { "ok": true, "value": {
-  "version": "0.4.4",
+  "version": "0.9.0",
   "model": { "provider": "opencode-go", "model": "deepseek-v4.1-flash" },
   "bilibili": { "cookie": false },
   "platforms": { "youtube": true, "bilibili": true },
@@ -434,19 +434,23 @@ data: {"type":"error","code":"asr-needs-ytdlp","message":"…"}
 - 错误：`{ok:false,code:'not-found'|'thumb-failed'|'ocr-no-ffmpeg',error}`。
 - 首次截图约 100ms，命中缓存约 20ms（320×180，4–5KB）。
 
-## 片段收藏（bookmarks）
+## 章节大纲与画面描述（outline）
 
-每个视频一份 `~/.dsh/video-bookmarks/<safeId(docId)>.json`，最多 200 条，按开始时间排序：
+章节页签与关键画面页签共用同一份「大纲」，优先用思维导图的一级节点（导图节点带模型定位的 `t` 秒），保证章节与导图一致：
 
-```json
-{"docId":"youtube:xxx","url":"…","title":"…","updatedAt":1730000000000,
- "items":[{"id":"1730000000000-ab12cd","start":43,"end":55,"text":"原字幕","label":"副标题","createdAt":1730000000000}]}
+```
+GET /dsh-video/api/outline?docId=<docId>
+→ {ok,value:{docId,duration,source:'mindmap'|'chapters'|'uniform',signature,
+             visuals:{generatedAt,provider,model,described}|null,
+             items:[{seconds,title,detail:[...],description}]}}
 ```
 
-- `GET /dsh-video/api/bookmarks?docId=<docId>` → `{ok,value:{docId,url,title,updatedAt,items}}`。
-- `POST /dsh-video/api/bookmarks/add` body `{docId?|url?, start, end?, text, label?}` → `{ok,value:{item,duplicate,count}}`（同一起点 ±1.5 秒且文本相同视为重复，不重复写）。
-- `POST /dsh-video/api/bookmarks/remove` body `{docId,id}` → `{ok,value:{docId,items}}`。
-- `POST /dsh-video/api/bookmarks/clear` body `{docId}` → `{ok,value:{docId,items:[]}}`。
+- 取点顺序：`analysis.mindmap`（≥3 个一级节点）→ 分析缓存里的章节 → 视频官方章节 → 均匀铺（最多 16 条）。
+- `POST /dsh-video/api/outline/visuals`（SSE，body `{docId?|url?, force}`）：抽帧（按大纲秒数）→ 拼成一张图 → 视觉模型逐格描述（`source` 与导图/章节返回一致）；帧 `phase` / `progress` / `done{items,cached,usage}` / `error{code,message}`。
+- 结果按 `(docId, 大纲签名)` 缓存在 `~/.dsh/video-outlines/<safeId>.json`，章节与关键画面共用；大纲变了（重新生成导图）缓存自动失效。
+- `GET /dsh-video/api/thumb?docId=&seconds=&w=320` 提供章节缩略图（`image/jpeg`，按视频缓存在 `~/.dsh/video-assets/<docId>/thumbs/`）。
+- `POST /dsh-video/api/outline/clear` body `{docId}` 清掉缓存的画面描述。
+- 思维导图节点的时间点会随分析缓存持久化（`analysis.mindmap` 保留 `t`），刷新页面后徽标仍在。
 
 ## 工具（agent-facing）
 

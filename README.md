@@ -26,11 +26,10 @@
 | 页签 | 做什么 |
 | --- | --- |
 | 总结 | 解析完自动流式生成；结构固定为 一句话总结 / 核心观点 / 内容脉络 / 关键要点 / 值得记住的说法 / 适合谁看，引用带 `[mm:ss]` 时间戳——**正文里的时间戳也可点击，点一下播放器跳到该时间点继续播放**。正文末尾还让模型顺手给出 **3 条「继续追问」**（只对本期内容成立的具体问题），host 会把它从正文里剥出来、单存成 `suggestions`，面板在追问空态里渲染成带虚线的 chip |
-| 章节 | 模型按时轴切 6–12 章（`POST /chapters` 只吐 JSON）；失败自动回落视频自带的章节 / 分 P |
-| 片段 | 收藏的片段列表：原文里点行尾的 ☆ 就能收进来，点一条跳到那个位置并继续播放，也可以复制文字或删除 |
+| 章节 | 章节大纲**以思维导图的一级节点为准**（`GET /outline`；导图节点带时间点，直接作为章节起点），导图还没生成时退回模型按时间轴切的章节、视频自带章节或分 P；每行带一张 `GET /thumb` 章节缩略图，点行跳转到该章并继续播放，播放时当前章节高亮 |
 | 原文 | 字幕逐段列表（`[mm:ss] 文本`），可搜索过滤、点单条复制、一键复制全文；「双语」开关把每段翻译成中文/英文（`POST /translate`，按批送模型、结果按视频缓存），开启「跟随」后播放器播到哪、对应段落就高亮滚到视野里（时间轴同步由播放器外壳每秒回传） |
 | 思维导图 | 模型把字幕整理成 3 层树状大纲（`GET /mindmap`，带缓存），面板渲染成 **SVG 图形化横向树**（节点卡片 + 贝塞尔连线、按分支配色），点节点折叠/展开，支持全部展开/收起、缩放、重新生成；节点上带可点的时间徽标（模型按字幕定位），点一下跳到视频对应位置 |
-| 关键画面 | 关键画面总览（PPT 模式）：`GET /keyframes` 优先取章节起点（带章节标题），没有章节就按镜头切点，最后均匀铺；卡片式网格 + 缩略图，点一张跳到那个画面并继续播放，适合快速扫全片结构 |
+| 关键画面 | 关键画面总览（PPT 模式）：与章节共用同一份大纲（`GET /outline`），一屏看到每章的代表画面；点「生成画面描述」让视觉模型一次性看完这套画面并给每章写一句描述（`POST /outline/visuals`，拼图后只发一张图），描述按视频缓存，章节页签也复用；点一张跳到那个画面并继续播放 |
 | 分镜 | 按镜头切点抽帧、拼成一张**分镜拼图**（`POST /storyboard`，默认 24 格按 3 列排；行数按帧数自动），每格左上角标时间；点任意一格跳到那个画面并继续播放。可选「附画面描述」让视觉模型给每格写一句描述（悬停格子可见）。图片按视频缓存在 `~/.dsh/video-storyboards/`，切回页签秒开；低清视频和镜头切点也按视频缓存在 `~/.dsh/video-assets/`，转写、画面理解、分镜共用同一份，第二次打开页签不再重新下载 |
 | 追问 | 左栏下方对话框：基于转写稿的 RAG 多轮问答（检索相关段落后再回答），回答带 `[mm:ss]`，下方「依据」chip 可点击跳转；对话按视频缓存。空态先给固定三句，再给 **AI 根据本视频总结生成的 3 条建议追问**（虚线 chip，点一下直接问） |
 | 设置 | 填 B 站 Cookie（SESSDATA），保存到 `~/.dsh/video-credentials.json`（0600）；可清除 |
@@ -142,7 +141,7 @@ git clone https://github.com/Azerz/dsh-video-insight.git
 装好后确认路由在线：
 
 ```bash
-curl -s http://127.0.0.1:50231/dsh-video/api/status   # 端口以实际 GUI 为准
+curl -s http://127.0.0.1:49269/dsh-video/api/status   # 端口以实际 GUI 为准
 ```
 
 host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文件、不跑构建。可选依赖（仅本地转写/画面识别需要）：`brew install ffmpeg yt-dlp whisper.cpp`，详见上文。
@@ -162,12 +161,11 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | GET | `/dsh-video/api/storyboard/image?docId=` | 分镜拼图 `image/jpeg`（`no-store`）；没生成过返回 `{code:'not-found'}` |
 | POST | `/dsh-video/api/storyboard` | SSE：`{docId?/url?, frames?:24, cols?:3, describe?:boolean, force?:boolean}`，帧 `phase` / `progress{stage:download\|scan\|frames,percent}` / `done{cached,docId,storyboard}` / `error{code,message}` |
 | POST | `/dsh-video/api/storyboard/clear` | `{docId}` 删掉该视频的分镜（json + jpg） |
-| GET | `/dsh-video/api/bookmarks?docId=` | 片段收藏：`{ok,value:{docId,url,title,updatedAt,items:[{id,start,end,text,label,createdAt}]}}` |
-| POST | `/dsh-video/api/bookmarks/add` | `{docId?/url?, start, end?, text, label?}` 新增收藏（同时间点同文本自动去重）：`{ok,value:{item,duplicate,count}}` |
-| POST | `/dsh-video/api/bookmarks/remove` | `{docId, id}` 删除一条 |
-| POST | `/dsh-video/api/bookmarks/clear` | `{docId}` 清空该视频的收藏 |
 | POST | `/dsh-video/api/history/favorite` | `{docId, favorite}` 历史列表星标：返回 `{ok,value:{items}}`（重新解析不会冲掉） |
-| GET | `/dsh-video/api/keyframes?docId=&count=16` | 关键画面时间点：`{ok,value:{docId,duration,items:[{seconds,label}]}}`（优先章节起点，其次镜头切点，最后均匀） |
+| GET | `/dsh-video/api/outline?docId=` | 章节/关键画面共用的大纲：`{ok,value:{docId,duration,source:'mindmap'\|'chapters'\|'uniform',signature,visuals,items:[{seconds,title,detail,description}]}}`；`visuals` 是已缓存的画面描述（没有则 null） |
+| POST | `/dsh-video/api/outline/visuals` | SSE，body `{docId?/url?, force}`：抽帧 → 拼一张图 → 视觉模型逐格描述；帧 `phase`/`progress`/`done{items,cached,usage}`/`error` |
+| POST | `/dsh-video/api/outline/clear` | `{docId}` 删掉该视频缓存的画面描述 |
+| GET | `/dsh-video/api/keyframes?docId=&count=16` | 关键画面时间点（与 `/outline` 同源，保留给旧客户端）：`{ok,value:{docId,duration,items:[{seconds,label}]}}` |
 | GET | `/dsh-video/api/thumb?docId=&seconds=&w=320` | 某个时间点的画面缩略图（`image/jpeg`，320×180；从缓存的低清视频里截，同一时间点只截一次）；也可传 `url=` 代替 `docId=` |
 | GET | `/dsh-video/api/assets?docId=` | 素材缓存状态：`{ok,value:{video:{bytes,duration,downloadedAt},cuts:{count,threshold,createdAt}}}` 或 `null` |
 | POST | `/dsh-video/api/assets/clear` | `{docId}` 清掉该视频的低清视频与切点缓存 |
@@ -181,7 +179,7 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | GET | `/dsh-video/api/analysis?docId=` | 取某个视频的分析缓存：`{ok,value:{docId,analysis:{summary,chapters,mindmap,chat}}}` |
 | POST | `/dsh-video/api/analysis/clear` | `{docId}` 清掉该视频全部缓存（总结/章节/导图/对话） |
 | POST | `/dsh-video/api/analysis/chat/clear` | `{docId}` 只清对话 |
-| GET | `/dsh-video/api/history` | `{ok,value:{items:[…]}}`，最近 20 条，新的在前（解析/分析成功后 host 自动写入）；带 `hasSummary/hasChapters/hasMindmap/chatCount` 标记 |
+| GET | `/dsh-video/api/history` | `{ok,value:{items:[…]}}`，最近 100 条，新的在前（解析/分析成功后 host 自动写入）；带 `hasSummary/hasChapters/hasMindmap/chatCount` 标记 |
 | POST | `/dsh-video/api/history/remove` | `{docId}` 删一条 → `{ok,value:{items}}` |
 | POST | `/dsh-video/api/history/clear` | 清空历史 → `{ok,value:{items:[]}}` |
 
