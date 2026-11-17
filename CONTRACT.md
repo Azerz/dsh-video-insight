@@ -397,6 +397,35 @@ data: {"type":"error","code":"asr-needs-ytdlp","message":"…"}
 
 - 节点可带可选 `t`（整数秒）：该主题在视频里对应的时间点，由模型按字幕时间戳判断，服务端夹到 `[0, duration]`；面板把 `t` 渲染成可点的时间徽标，点了跳播放位置。没有 `t` 的节点不显示徽标。
 
+## 素材缓存（assets）
+
+抽帧相关的功能（画面文字识别、画面理解、分镜）共用同一条视频的下载与切点扫描结果，按视频缓存在：
+
+```
+~/.dsh/video-assets/<safeId(docId)>/video.<ext>   低清视频（≤480p，无音轨）
+~/.dsh/video-assets/<safeId(docId)>/video.json    元信息（bytes / duration / downloadedAt）
+~/.dsh/video-assets/<safeId(docId)>/cuts.json     镜头切点（duration / threshold 变了才失效）
+```
+
+- 清理策略：按目录 LRU，最多 8 个视频、总大小 ≤2GiB、30 天未访问删除。
+- `GET /dsh-video/api/assets?docId=<docId>` → `{ok,value:{video:{bytes,duration,downloadedAt},cuts:{count,threshold,createdAt}}}`（没有缓存时 `value:null`）。
+- `POST /dsh-video/api/assets/clear` body `{docId}` → `{ok,value:{docId,cleared}}`。
+- 命中缓存时 SSE 的 phase 会写「复用已经下载好的低清视频…」「复用上次扫到的 N 个镜头切点…」。
+
+## 片段收藏（bookmarks）
+
+每个视频一份 `~/.dsh/video-bookmarks/<safeId(docId)>.json`，最多 200 条，按开始时间排序：
+
+```json
+{"docId":"youtube:xxx","url":"…","title":"…","updatedAt":1730000000000,
+ "items":[{"id":"1730000000000-ab12cd","start":43,"end":55,"text":"原字幕","label":"副标题","createdAt":1730000000000}]}
+```
+
+- `GET /dsh-video/api/bookmarks?docId=<docId>` → `{ok,value:{docId,url,title,updatedAt,items}}`。
+- `POST /dsh-video/api/bookmarks/add` body `{docId?|url?, start, end?, text, label?}` → `{ok,value:{item,duplicate,count}}`（同一起点 ±1.5 秒且文本相同视为重复，不重复写）。
+- `POST /dsh-video/api/bookmarks/remove` body `{docId,id}` → `{ok,value:{docId,items}}`。
+- `POST /dsh-video/api/bookmarks/clear` body `{docId}` → `{ok,value:{docId,items:[]}}`。
+
 ## 工具（agent-facing）
 
 插件在 `ctx.inject(['tools'])` 里注册两个**全局**工具（fiber 不是 agent scope，所以任何会话——包括 qqbot 用 `ctx.agents.create()` 起的 QQ 会话——都看得见）：
