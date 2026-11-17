@@ -1946,6 +1946,14 @@ window.__ModuleLoader__.load({
         }),
         h('span', { key: 't' }, '无字幕视频自动转写（解析到没有字幕的视频时自动在本地跑一次转写，长视频可能要等一会儿）'),
       ]));
+      rows.push(h('label', { key: 'cross', className: 'dvv-check' }, [
+        h('input', {
+          key: 'c', type: 'checkbox', checked: config.crossCheck !== false,
+          onChange: () => onConfig({ crossCheck: config.crossCheck === false }),
+        }),
+        h('span', { key: 't' }, '语音与画面并行分析'),
+      ]));
+      rows.push(h('div', { key: 'cross-note', className: 'dvv-note' }, '和语音转写同时跑画面分析，两路结果互相印证（多花一次视觉模型调用）。'));
       const ocr = asr.ocr || {};
       rows.push(h('label', { key: 'ocr', className: 'dvv-check' }, [
         h('input', {

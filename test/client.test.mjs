@@ -447,7 +447,7 @@ const ASR = {
   config: {
     threads: 0, maxSeconds: 0, keepAudio: false, autoTranscribe: true,
     ocrFallback: true, ocrIntervalSeconds: 8, ocrMaxFrames: 120,
-    frameMode: 'auto', visionModel: '', visionMaxFrames: 48,
+    frameMode: 'auto', visionModel: '', visionMaxFrames: 48, crossCheck: true,
   },
   tools: {
     ffmpeg: { available: true, path: '/opt/homebrew/bin/ffmpeg' },
@@ -753,7 +753,7 @@ function resetRoutes() {
     'asr/config': (call) => {
       const body = call.body || {};
       for (const key of ['enabled', 'engine']) if (key in body) ASR[key] = body[key];
-      for (const key of ['threads', 'maxSeconds', 'keepAudio', 'autoTranscribe', 'ocrFallback', 'ocrIntervalSeconds', 'ocrMaxFrames', 'frameMode', 'visionModel', 'visionMaxFrames']) {
+      for (const key of ['threads', 'maxSeconds', 'keepAudio', 'autoTranscribe', 'crossCheck', 'ocrFallback', 'ocrIntervalSeconds', 'ocrMaxFrames', 'frameMode', 'visionModel', 'visionMaxFrames']) {
         if (key in body) ASR.config[key] = body[key];
       }
       if (ASR.vision && ASR.vision.config) {
@@ -1300,7 +1300,7 @@ checkIncludes('最长处理时长字段', nodeText(tree), '最长处理时长（
 
 const settingsModal = byClass(tree, 'dvv-modal');
 const checkboxes = allByTag(settingsModal, 'input').filter((node) => node.props.type === 'checkbox');
-check('设置里有 4 个复选框', checkboxes.length === 4);
+check('设置里有 5 个复选框', checkboxes.length === 5);
 const enabledLabel = findOne(settingsModal, (node) => node.__host === 'element' && node.tag === 'label'
   && (nodeText(node).includes('已开启') || nodeText(node).includes('已关闭')));
 const enabledBox = enabledLabel ? allByTag(enabledLabel, 'input')[0] : null;
@@ -1309,6 +1309,31 @@ tree = await settle();
 check('开启转写 POST enabled=true', callsOf('asr/config').some((call) => call.body && call.body.enabled === true));
 enabledBox && enabledBox.props.onChange && enabledBox.props.onChange({ target: { checked: false } });
 tree = await settle();
+
+/* 语音与画面并行分析（crossCheck，默认开） */
+function crossCheckLabel() {
+  return findOne(tree, (node) => node.__host === 'element' && node.tag === 'label'
+    && nodeText(node).includes('语音与画面并行分析'));
+}
+const crossLabel = crossCheckLabel();
+check('并行分析复选框存在', Boolean(crossLabel));
+checkIncludes('并行分析说明文字', nodeText(tree), '两路结果互相印证');
+const crossBox = crossLabel ? allByTag(crossLabel, 'input')[0] : null;
+check('并行分析默认勾选', Boolean(crossBox && crossBox.props.checked === true));
+crossBox && crossBox.props.onChange && crossBox.props.onChange({ target: { checked: false } });
+tree = await settle();
+check('取消并行分析 POST crossCheck=false', callsOf('asr/config').some((call) => call.body && call.body.crossCheck === false));
+const crossCall = callsOf('asr/config').filter((call) => call.body && 'crossCheck' in call.body).pop();
+check('crossCheck 只提交该字段', Boolean(crossCall && Object.keys(crossCall.body).length === 1));
+const crossLabel2 = crossCheckLabel();
+const crossBox2 = crossLabel2 ? allByTag(crossLabel2, 'input')[0] : null;
+check('并行分析回显为未勾选', Boolean(crossBox2 && crossBox2.props.checked === false));
+crossBox2 && crossBox2.props.onChange && crossBox2.props.onChange({ target: { checked: true } });
+tree = await settle();
+check('重新勾选 POST crossCheck=true', callsOf('asr/config').some((call) => call.body && call.body.crossCheck === true));
+const crossLabel3 = crossCheckLabel();
+const crossBox3 = crossLabel3 ? allByTag(crossLabel3, 'input')[0] : null;
+check('并行分析回显为已勾选', Boolean(crossBox3 && crossBox3.props.checked === true));
 
 const numberFields = allByTag(byClass(tree, 'dvv-modal'), 'input').filter((node) => node.props.type === 'number');
 check('设置里有 5 个数字输入', numberFields.length === 5);
