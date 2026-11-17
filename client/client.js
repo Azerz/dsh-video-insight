@@ -64,6 +64,8 @@ window.__ModuleLoader__.load({
       'local-whisper': '本地 Whisper', 'local-sensevoice': '本地 SenseVoice',
       'frame-ocr': '画面文字（OCR）',
       'frame-vision': '画面理解',
+      'audio+vision': '语音 + 画面',
+      'audio+ocr': '语音 + 画面文字',
     };
     const LANG_LABEL = {
       zh: '中文', 'zh-cn': '中文', 'zh-hans': '中文', 'zh-tw': '繁體中文', 'zh-hant': '繁體中文',

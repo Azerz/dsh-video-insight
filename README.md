@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#已知限制)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.8.2-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.8.3-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -153,7 +153,7 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | GET | `/dsh-video/api/status` | `{ok,value:{version,model,bilibili:{cookie},platforms,transcriptLimitChars,asr:{enabled,ready,engine,activeEngine,engineLabel,downloadReady}}}` |
 | GET | `/dsh-video/api/resolve?url=&force=1` | 解析链接 → `VideoDoc`（失败也是 HTTP 200 + `{ok:false,code,error}`） |
 | GET | `/dsh-video/api/asr/status?fresh=1` | 本地转写组件/引擎/模型状态 + `ocr`（画面文字识别）+ `vision`（画面理解/视觉模型能力）+ `privacy` 文案 + `hints` |
-| POST | `/dsh-video/api/asr/config` | `{enabled?,engine?,threads?,maxSeconds?,keepAudio?,autoTranscribe?,ocrFallback?,ocrIntervalSeconds?,ocrMaxFrames?,frameSampling?:cuts\|uniform,cutThreshold?,frameMode?:auto\|ocr\|vision,visionModel?,visionMaxFrames?,visionPack?:sheet\|frames,sheetCols?}` → 新状态 |
+| POST | `/dsh-video/api/asr/config` | `{enabled?,engine?,threads?,maxSeconds?,keepAudio?,autoTranscribe?,crossCheck?,ocrFallback?,ocrIntervalSeconds?,ocrMaxFrames?,frameSampling?:cuts\|uniform,cutThreshold?,frameMode?:auto\|ocr\|vision,visionModel?,visionMaxFrames?,visionPack?:sheet\|frames,sheetCols?}` → 新状态 |
 | POST | `/dsh-video/api/transcribe` | SSE：`{url?/docId?, force?}`，帧 `phase` / `progress{percent,stage}` / `done{docId,transcript,cached?}` / `error{code,message}`；无语音时自动兜底 OCR / 画面理解（stage 含 `vision`） |
 | POST | `/dsh-video/api/analyze` | SSE：`{mode:'summary'\|'ask', url?/docId?, question?, history?}`，帧 `phase` / `delta` / `done` / `error` |
 | POST | `/dsh-video/api/chapters` | `{url?/docId?}` → `{ok,value:{chapters:[{start,title,gist}],duration}}` |
@@ -214,6 +214,7 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
           enabled: true
           engine: auto          # auto | whisper | sensevoice
           autoTranscribe: true  # 解析到无字幕视频时自动本地转写
+          crossCheck: true      # 语音与画面两路并行分析、结果互相印证（默认 true）
           ocrFallback: true       # 连语音都没有时，抽帧做画面文字识别（OCR）
           frameSampling: cuts     # cuts=按镜头切点抽帧（默认）| uniform=固定间隔
           cutThreshold: 27        # 镜头切点阈值（6-40），越高越只抓明显转场
@@ -236,6 +237,7 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 - YouTube 字幕是定时文本，标点/语气词可能有噪声；滚动字幕的重复窗口已做去重。
 - B 站字幕只有「有 Cookie + 该视频确有 AI 字幕」才拿得到，不是每个视频都有。
 - 按镜头抽帧时，画面文字段的「结束时间」按相邻帧间隔的中位数估算（各帧自身的秒数是准的），时间轴粗一点但不会串行；
+- 语音转写与画面分析**并行**：`crossCheck` 默认开启，`POST /transcribe` 一开始就同时下载音频和低清视频、跑 whisper 与抽帧识别，两路结果合并成一份稿子（画面描述带「画面：」前缀）互相印证；显式设 `crossCheck: false` 才回到「先语音、没有语音再看画面」的顺序。
 - 画面文字识别：只在 macOS 可用（依赖系统 Vision 框架）；识别质量取决于画面文字是否清晰，滚动弹幕/花哨字体容易出错；抽帧默认按镜头切点（找不到切点时均匀铺满），因此长视频的覆盖密度取决于镜头数量而不是固定间隔。
 - 画面理解：需要当前（或设置里指定的）模型声明 `image` 输入能力；会把拼好的分镜图发给模型（与 OCR 的本机离线不同）；默认一张图装 9–24 格，所以按「张」而不是按「帧」计费（比逐帧省很多），单次生成仍要 15–30s；画面里既没字也没可描述内容时仍会得到 `asr-empty`。
 - 本地转写：Whisper 首次加载 574MB 模型约 6–12 秒（每次调用固定成本，长视频占比可忽略）；SenseVoice 段级时间戳是按标点聚合的近似值；`threads: 0` 交给引擎自己决定（whisper.cpp 默认 4）。

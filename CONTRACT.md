@@ -13,7 +13,7 @@ const API_BASE = new URL('dsh-video/api/', document.baseURI).toString();
 
 ```json
 { "ok": true, "value": {
-  "version": "0.8.2",
+  "version": "0.8.3",
   "model": { "provider": "opencode-go", "model": "deepseek-v4.1-flash" },
   "bilibili": { "cookie": false },
   "platforms": { "youtube": true, "bilibili": true },
@@ -63,7 +63,7 @@ const API_BASE = new URL('dsh-video/api/', document.baseURI).toString();
   "transcript": {
     "available": true,
     "source": "bilibili-ai-subtitle" | "bilibili-subtitle" | "youtube-caption" | "youtube-asr"
-            | "local-whisper" | "local-sensevoice" | "frame-ocr" | "frame-vision" | "none",
+            | "local-whisper" | "local-sensevoice" | "frame-ocr" | "frame-vision" | "audio+vision" | "audio+ocr" | "none",
     "engine": "whisper | sensevoice（仅本地转写时有）",
     "engineLabel": "Whisper（whisper.cpp）（仅本地转写时有）",
     "tookMs": 90638,
@@ -262,6 +262,7 @@ data: {"type":"error","code":"asr-needs-ytdlp","message":"…"}
    - `visionPack`：`sheet`（默认）把这批帧用 ffmpeg `tile` 拼成一张分镜图（`sheetCols` 列、行数向上取整），提示里带「第几格 = 第几秒」对应表，模型只收一张图；拼图或解析失败时自动回落到 `frames`（逐帧发送，每批 4 张）；
    - 分镜拼图不落盘、不画字（时间标签走提示词对应表），面板上由前端按同一份 layout 画角标；
    - 合并成带时间戳文字稿：有视觉描述时 `source = "frame-vision"`（`engine = "vision"`），只靠文字时 `source = "frame-ocr"`（`engine = "vision-ocr"`），结构与语音转写一致；
+   - **并行管线（`crossCheck`，默认 true）**：`POST /transcribe` 在开始时就同时跑「语音转写」和「画面分析」两路（各自独立 workdir，素材缓存有 in-flight 去重，同一份低清视频只下载一次）；两路都有内容时合并为一份稿子，视觉那一路带描述时 `source = "audio+vision"`、只用到画面文字时 `source = "audio+ocr"`，`engine = "<asr>+vision"` / `"<asr>+vision-ocr"`，画面段文字带「画面：」前缀，并带 `crossChecked: true` 与 `visual: {source, engine, engineLabel, describedFrames}`。语音那一路判为无语音（`asr-empty`）时只用画面稿；`frameMode = "ocr"` 或 `crossCheck = false` 时退回原来的「先语音、失败再画面」顺序；
    - 视觉模型由 `visionModel`（`provider/model`）指定，留空则用当前会话默认模型；默认模型没有声明 `image` 输入能力时 `vision.available=false` 并给出候选模型提示。`/resolve` 对这类视频同样会自动挂上持久化结果，并把「没有可用字幕」的警告换成「已使用本地画面文字识别稿（OCR）」/「已使用本地画面理解稿」。
 
 ## 历史记录（最近 20 条）
