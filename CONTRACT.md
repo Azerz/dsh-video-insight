@@ -412,6 +412,16 @@ data: {"type":"error","code":"asr-needs-ytdlp","message":"…"}
 - `POST /dsh-video/api/assets/clear` body `{docId}` → `{ok,value:{docId,cleared}}`。
 - 命中缓存时 SSE 的 phase 会写「复用已经下载好的低清视频…」「复用上次扫到的 N 个镜头切点…」。
 
+## 画面缩略图（thumb）
+
+从缓存的低清视频按秒截一帧，给章节列表 / 关键画面用：
+
+- `GET /dsh-video/api/thumb?docId=<docId>&seconds=<秒>&w=320` → `image/jpeg`（默认 320 宽、等比缩放，`cache-control: private, max-age=86400`）。
+- 也接受 `url=<链接>` 代替 `docId`（未命中解析缓存时现场解析）；视频缓存不存在时会先下载一次 480p（phase 不可见，耗时约 5–20s）。
+- 截图缓存在 `~/.dsh/video-assets/<docId>/thumbs/<秒>.jpg`，与视频缓存同生命周期。
+- 错误：`{ok:false,code:'not-found'|'thumb-failed'|'ocr-no-ffmpeg',error}`。
+- 首次截图约 100ms，命中缓存约 20ms（320×180，4–5KB）。
+
 ## 片段收藏（bookmarks）
 
 每个视频一份 `~/.dsh/video-bookmarks/<safeId(docId)>.json`，最多 200 条，按开始时间排序：

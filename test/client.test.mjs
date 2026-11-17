@@ -669,6 +669,11 @@ function translateEvents(lang) {
 
 let translateCache = null;
 
+let bookmarkItems = [
+  { id: 'bm-1', start: 8, end: 12, text: '第一性原理是拆到最本质的问题', createdAt: now - 60e3 },
+  { id: 'bm-2', start: 62, end: 70, text: '注意力经济让内容变得碎片化', label: '重点', createdAt: now - 30e3 },
+];
+
 let historyItems = [
   {
     docId: 'bilibili:BV1xx411c7mD', url: BILI_DOC.url, platform: 'bilibili', id: 'BV1xx411c7mD',
@@ -736,6 +741,39 @@ function resetRoutes() {
       return { __sse: STORYBOARD_EVENTS };
     },
     'storyboard/clear': (call) => ({ ok: true, value: { docId: call.body && call.body.docId } }),
+    bookmarks: (call) => {
+      const docId = String((call.params && call.params.docId) || '');
+      if (docId.startsWith('youtube:')) {
+        return { ok: true, value: { docId, url: '', title: '', updatedAt: now, items: [] } };
+      }
+      return {
+        ok: true,
+        value: { docId, url: BILI_DOC.url, title: BILI_DOC.title, updatedAt: now, items: bookmarkItems },
+      };
+    },
+    'bookmarks/add': (call) => {
+      const body = call.body || {};
+      const start = Number(body.start);
+      const duplicate = bookmarkItems.find((item) => Math.abs(Number(item.start) - start) <= 1.5);
+      if (duplicate) return { ok: true, value: { item: duplicate, duplicate: true, count: bookmarkItems.length } };
+      const item = {
+        id: `bm-${bookmarkItems.length + 1}`,
+        start, end: Number(body.end),
+        text: String(body.text || ''), label: body.label || undefined,
+        createdAt: now,
+      };
+      bookmarkItems.push(item);
+      return { ok: true, value: { item, duplicate: false, count: bookmarkItems.length } };
+    },
+    'bookmarks/remove': (call) => {
+      const id = String((call.body && call.body.id) || '');
+      bookmarkItems = bookmarkItems.filter((item) => item.id !== id);
+      return { ok: true, value: { docId: call.body && call.body.docId, items: bookmarkItems } };
+    },
+    'bookmarks/clear': (call) => {
+      bookmarkItems = [];
+      return { ok: true, value: { docId: call.body && call.body.docId, items: [] } };
+    },
     'analysis/clear': (call) => ({ ok: true, value: { docId: call.body && call.body.docId } }),
     'analysis/chat/clear': (call) => ({ ok: true, value: { docId: call.body && call.body.docId } }),
     'analysis': () => ({ ok: false, code: 'not-found', error: '没有缓存' }),
@@ -912,7 +950,8 @@ check('下载文件名为视频标题', sandbox.__downloads[0] && sandbox.__down
 check('下载 blob 类型为 markdown', sandbox.__blobs.length === 1 && String(sandbox.__blobs[0].type).includes('text/markdown'));
 check('下载后 revokeObjectURL', sandbox.__revoked.length === 1);
 checkIncludes('页签包含分镜', nodeText(byClass(tree, 'dvv-tabbar')), '分镜');
-check('页签共 5 个', allByClass(tree, 'dvv-tab').length === 5);
+checkIncludes('页签包含片段', nodeText(byClass(tree, 'dvv-tabbar')), '片段');
+check('页签共 6 个', allByClass(tree, 'dvv-tab').length === 6);
 
 // 点总结里的时间徽标 → seek
 const tsBadge = allByClass(tree, 'dvv-md-ts')[0] || allByClass(tree, 'dvv-ts')[0];
@@ -1272,6 +1311,91 @@ const mdCopyBtn = buttonByText(tree, '复制 Markdown');
 const mdDownloadBtn = buttonByText(tree, '下载 .md');
 check('总结为空时「复制 Markdown」禁用', Boolean(mdCopyBtn) && mdCopyBtn.props.disabled === true);
 check('总结为空时「下载 .md」禁用', Boolean(mdDownloadBtn) && mdDownloadBtn.props.disabled === true);
+
+/* ---------------------------------------------------------------- 片段收藏 */
+
+// 回到带字幕的 B 站视频
+let bmInput = byClass(tree, 'dvv-input');
+change(bmInput, BILI_DOC.url);
+tree = await settle();
+bmInput = byClass(tree, 'dvv-input');
+keydown(bmInput, 'Enter');
+tree = await settle(40);
+
+clickText(tree, '原文');
+tree = await settle(20);
+check('打开原文时拉取收藏列表', callsOf('bookmarks').some((call) => call.method === 'GET'));
+const starNodes = allByClass(tree, 'dvv-seg-bm');
+check('原文每行都有收藏按钮', starNodes.length === SEGMENTS.length);
+check('已收藏的段显示实心星', starNodes.map((node) => nodeText(node)).join('') === '☆★★');
+
+const star0 = allByClass(tree, 'dvv-seg-bm')[0];
+click(star0);
+tree = await settle(20);
+const addCall = callsOf('bookmarks/add')[0];
+check('点 ☆ 收藏 POST /bookmarks/add', Boolean(addCall)
+  && addCall.body.docId === 'bilibili:BV1xx411c7mD'
+  && addCall.body.start === 0 && addCall.body.end === 4
+  && addCall.body.text === '大家好，今天我们聊 AI 编程');
+checkIncludes('收藏成功 toast', nodeText(tree), '已收藏 0:00');
+check('收藏后该行变实心星', allByClass(tree, 'dvv-seg-bm').map((node) => nodeText(node)).join('') === '★★★');
+
+click(allByClass(tree, 'dvv-seg-bm')[0]);
+tree = await settle(20);
+checkIncludes('重复收藏有提示', nodeText(tree), '这一段已经收藏过了');
+
+clickText(tree, '片段');
+tree = await settle(20);
+check('片段页显示已收藏条目', allByClass(tree, 'dvv-bm-row').length === 3);
+checkIncludes('片段显示时间范围', nodeText(tree), '0:00–0:04');
+checkIncludes('片段显示标签', nodeText(tree), '重点');
+checkIncludes('片段显示正文', nodeText(tree), '注意力经济让内容变得碎片化');
+
+const bmTime = allByClass(tree, 'dvv-bm-time')[0];
+click(bmTime);
+tree = await settle();
+check('片段时间徽标跳到对应时间', allByTag(tree, 'iframe')[0].contentWindow.messages
+  .some((msg) => msg && msg.type === 'dsh-video:seek' && msg.seconds === 0));
+
+const copyBtn = buttonByText(tree, '复制');
+click(copyBtn);
+tree = await settle();
+const bmCopy = sandbox.__clipboardWrites[sandbox.__clipboardWrites.length - 1] || '';
+check('复制片段带时间与正文', bmCopy.includes('0:00–0:04') && bmCopy.includes('大家好，今天我们聊 AI 编程'));
+checkIncludes('复制片段 toast', nodeText(tree), '已复制片段');
+
+const delBookmark = buttonByText(tree, '删除');
+click(delBookmark);
+tree = await settle(20);
+check('删除片段 POST /bookmarks/remove', callsOf('bookmarks/remove').length === 1);
+check('删除后剩 2 条', allByClass(tree, 'dvv-bm-row').length === 2);
+
+clickText(tree, '清空');
+tree = await settle();
+checkIncludes('清空片段需二次确认', nodeText(tree), '确认清空？');
+clickText(tree, '确认清空？');
+tree = await settle(20);
+check('清空片段 POST /bookmarks/clear', callsOf('bookmarks/clear').length === 1);
+checkIncludes('清空后片段空态', nodeText(tree), '还没有收藏的片段');
+checkIncludes('清空后引导去原文收藏', nodeText(tree), '在「原文」里点每行右边的 ☆ 就能收进来');
+
+// 收藏加载失败：错误提示 + 重试
+const savedBookmarksRoute = routes.bookmarks;
+routes.bookmarks = () => ({ ok: false, code: 'internal', error: 'boom' });
+let bmInput2 = byClass(tree, 'dvv-input');
+change(bmInput2, YT_DOC.url);
+tree = await settle();
+bmInput2 = byClass(tree, 'dvv-input');
+keydown(bmInput2, 'Enter');
+tree = await settle(40);
+clickText(tree, '片段');
+tree = await settle(20);
+checkIncludes('收藏加载失败显示中文错误', nodeText(tree), '加载收藏失败：boom');
+check('收藏加载失败有重试按钮', Boolean(buttonByText(tree, '重试')));
+routes.bookmarks = savedBookmarksRoute;
+clickText(tree, '重试');
+tree = await settle(20);
+checkIncludes('重试后回到空态', nodeText(tree), '还没有收藏的片段');
 
 /* ---------------------------------------------------------------- 错误与返回 */
 

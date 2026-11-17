@@ -165,6 +165,7 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | POST | `/dsh-video/api/bookmarks/add` | `{docId?/url?, start, end?, text, label?}` 新增收藏（同时间点同文本自动去重）：`{ok,value:{item,duplicate,count}}` |
 | POST | `/dsh-video/api/bookmarks/remove` | `{docId, id}` 删除一条 |
 | POST | `/dsh-video/api/bookmarks/clear` | `{docId}` 清空该视频的收藏 |
+| GET | `/dsh-video/api/thumb?docId=&seconds=&w=320` | 某个时间点的画面缩略图（`image/jpeg`，320×180；从缓存的低清视频里截，同一时间点只截一次）；也可传 `url=` 代替 `docId=` |
 | GET | `/dsh-video/api/assets?docId=` | 素材缓存状态：`{ok,value:{video:{bytes,duration,downloadedAt},cuts:{count,threshold,createdAt}}}` 或 `null` |
 | POST | `/dsh-video/api/assets/clear` | `{docId}` 清掉该视频的低清视频与切点缓存 |
 | GET | `/dsh-video/api/translate?docId=&lang=zh\|en` | 取缓存的双语对照：`{ok,value:{docId,lang,count,translations:[{start,end,text,translation}]}\|null}` |

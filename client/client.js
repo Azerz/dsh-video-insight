@@ -40,6 +40,7 @@ window.__ModuleLoader__.load({
     const VISION_MODEL_PLACEHOLDER = 'opencode-go/deepseek-v4.1-flash';
     /** 分镜：host 生成的分镜拼图（GET 读缓存 / POST SSE 生成），格子带秒数可 seek。 */
     const EMPTY_STORYBOARD = { data: null, loading: false, phase: '', percent: null, error: '', code: '' };
+    const EMPTY_BOOKMARKS = { loading: false, loaded: false, error: '', items: [] };
     const STORYBOARD_STAGE_LABEL = { download: '正在下载视频…', scan: '正在扫描镜头…', frames: '正在抽取画面…' };
 
     /** 原文双语对照：host 按视频缓存翻译结果（GET 读缓存 / POST SSE 生成）。 */
@@ -64,7 +65,7 @@ window.__ModuleLoader__.load({
       zh: '中文', 'zh-cn': '中文', 'zh-hans': '中文', 'zh-tw': '繁體中文', 'zh-hant': '繁體中文',
       en: 'English', 'en-us': 'English', 'en-gb': 'English', ja: '日本語', ko: '한국어',
     };
-    const TABS = [['summary', '总结'], ['chapters', '章节'], ['transcript', '原文'], ['mindmap', '思维导图'], ['storyboard', '分镜']];
+    const TABS = [['summary', '总结'], ['chapters', '章节'], ['transcript', '原文'], ['bookmarks', '片段'], ['storyboard', '分镜'], ['mindmap', '思维导图']];
     const ASK_EXAMPLES = ['这个视频最核心的论点是什么？', '作者的观点有哪些可疑之处？', '用 5 句话讲给完全不懂的人听'];
 
     function platformMeta(platform) {
@@ -1103,26 +1104,109 @@ window.__ModuleLoader__.load({
         ]) : null,
         !segments.length ? h('div', { key: 'empty', className: 'dvv-note' }, '这个视频的字幕是空的。') : null,
         segments.length && !entries.length ? h('div', { key: 'nomatch', className: 'dvv-note' }, '没有匹配的字幕。') : null,
-        h('div', { key: 'list', className: 'dvv-segs' }, shown.map((entry) => h('button', {
-          key: `seg-${entry.index}`, type: 'button', className: 'dvv-seg',
-          'data-tr': translateOn ? 'true' : undefined,
-          'data-current': entry.index === currentIndex ? 'true' : undefined,
-          ref: (node) => { rowsRef.current[entry.index] = node; },
-          onClick: () => {
-            onCopySegment(entry.segment); // 原有行为：点单条复制
-            const start = Number(entry.segment.start);
-            if (Number.isFinite(start)) onSeek(start); // 同时跳转播放位置
-          },
-        }, [
-          h('span', { key: 't', className: 'dvv-seg-time' }, `[${fmtTime(entry.segment.start)}]`),
-          h('span', { key: 'x', className: 'dvv-seg-text' }, entry.segment.text),
-          entry.translation ? h('span', { key: 'tr', className: 'dvv-tr-text' }, entry.translation) : null,
-        ].filter(Boolean)))),
+        h('div', { key: 'list', className: 'dvv-segs' }, shown.map((entry) => {
+          const saved = bookmarkFor(props.bookmarkMap, entry.segment.start);
+          const toggle = (event) => {
+            if (event) { if (typeof event.preventDefault === 'function') event.preventDefault(); if (typeof event.stopPropagation === 'function') event.stopPropagation(); }
+            if (typeof props.onToggleBookmark === 'function') props.onToggleBookmark(entry.segment);
+          };
+          return h('button', {
+            key: `seg-${entry.index}`, type: 'button', className: 'dvv-seg',
+            'data-tr': translateOn ? 'true' : undefined,
+            'data-current': entry.index === currentIndex ? 'true' : undefined,
+            ref: (node) => { rowsRef.current[entry.index] = node; },
+            onClick: () => {
+              onCopySegment(entry.segment); // 原有行为：点单条复制
+              const start = Number(entry.segment.start);
+              if (Number.isFinite(start)) onSeek(start); // 同时跳转播放位置
+            },
+          }, [
+            h('span', { key: 't', className: 'dvv-seg-time' }, `[${fmtTime(entry.segment.start)}]`),
+            h('span', { key: 'x', className: 'dvv-seg-text' }, entry.segment.text),
+            entry.translation ? h('span', { key: 'tr', className: 'dvv-tr-text' }, entry.translation) : null,
+            h('span', { key: 'bm', className: 'dvv-seg-bm', role: 'button', tabIndex: 0, 'data-on': saved ? 'true' : 'false', title: saved ? '已收藏，再点会提示重复收藏' : '收藏这一段', onClick: toggle, onKeyDown: (event) => { if (event && (event.key === 'Enter' || event.key === ' ')) toggle(event); } }, saved ? '★' : '☆'),
+          ].filter(Boolean));
+        })),
         entries.length > SEGMENT_LIMIT && !showAll
           ? h('div', { key: 'more', className: 'dvv-actions' }, h('button', { type: 'button', className: 'dvv-btn', onClick: onShowAll }, `显示全部（${entries.length} 条）`))
           : null,
       ].filter(Boolean);
       return h('div', { className: 'dvv-tabpane' }, parts);
+    }
+
+    /* -------------------------------------------------------------- 片段收藏 */
+    /** /bookmarks 的 items → [{ item, start, end }]（start 合法的条目）。 */
+    function buildBookmarkMap(items) {
+      return (Array.isArray(items) ? items : []).map((item) => ({ item, start: Number(item && item.start), end: Number(item && item.end) })).filter((entry) => Number.isFinite(entry.start));
+    }
+    /** 字幕行对应的收藏条目（start ±1.5s 容错 host 取整）。 */
+    function bookmarkFor(map, start) {
+      const target = Number(start);
+      const hit = Number.isFinite(target) ? (Array.isArray(map) ? map : []).find((entry) => Math.abs(entry.start - target) <= 1.5) : null;
+      return hit ? hit.item : null;
+    }
+    /** 时间范围文案：`0:08–0:12`（缺 end 时只显示起点）。 */
+    function bookmarkClock(item) {
+      const start = Number(item && item.start), end = Number(item && item.end);
+      const head = Number.isFinite(start) ? formatClock(start) : '--:--';
+      return Number.isFinite(start) && Number.isFinite(end) && end > start ? `${head}–${formatClock(end)}` : head;
+    }
+    /** 复制片段用的纯文本：`标签 0:08–0:12 正文`。 */
+    function bookmarkCopyText(item) {
+      const label = item && item.label ? `${String(item.label).trim()} ` : '';
+      return `${label}${bookmarkClock(item)} ${String((item && item.text) || '').trim()}`.trim();
+    }
+    /** 收藏接口错误：code → 用户能看懂的中文。 */
+    function friendlyBookmarkError(error, action) {
+      const code = String((error && error.code) || '');
+      const message = String((error && error.message) || error || '未知错误'), verb = action || '收藏';
+      if (code === 'bad-url') return '这个视频的链接不完整，重新粘贴链接解析后再试。';
+      if (code === 'not-found' || code === 'no-doc') return '没有找到这个视频，重新解析一次再收藏。';
+      if (code === 'bad-json') return `${verb}失败：请求格式不对，请重试一次。`;
+      return `${verb}失败：${message}`;
+    }
+    /** 片段页签：时间跳转 / 复制 / 删除 / 清空二次确认。 */
+    function BookmarksTab({ bookmarks, onSeek, onCopy, onRemove, onClear, onRetry }) {
+      const [confirming, setConfirming] = useState(false);
+      const state = bookmarks || EMPTY_BOOKMARKS;
+      const items = (Array.isArray(state.items) ? state.items : []).slice().sort((a, b) => Number(a.start) - Number(b.start));
+      useEffect(() => { setConfirming(false); }, [items.length]);
+      if (state.loading) {
+        return h('div', { className: 'dvv-tabpane dvv-loading-block' }, [h('span', { key: 's', className: 'dvv-spinner' }), h('span', { key: 't' }, '正在读取收藏…')]);
+      }
+      const clearLabel = confirming ? '确认清空？' : '清空';
+      const parts = [h('div', { key: 'bar', className: 'dvv-bm-bar' }, [
+        h('span', { key: 't', className: 'dvv-bm-bar-title' }, '片段'),
+        h('span', { key: 'c', className: 'dvv-note' }, `${items.length} 条`),
+        h('div', { key: 's', className: 'dvv-spacer' }),
+        h('button', { key: 'clear', type: 'button', className: 'dvv-btn', disabled: !items.length, onClick: () => { if (confirming) { setConfirming(false); if (onClear) onClear(); } else setConfirming(true); } }, clearLabel),
+        confirming ? h('button', { key: 'x', type: 'button', className: 'dvv-btn', onClick: () => setConfirming(false) }, '取消') : null,
+      ].filter(Boolean))];
+      if (state.error) {
+        parts.push(h('div', { key: 'e', className: 'dvv-error' }, [
+          h('span', { key: 'm' }, state.error),
+          typeof onRetry === 'function' ? h('button', { key: 'r', type: 'button', className: 'dvv-btn', onClick: () => onRetry() }, '重试') : null,
+        ].filter(Boolean)));
+      }
+      if (!items.length) {
+        parts.push(h('div', { key: 'empty', className: 'dvv-notice' }, [
+          h('div', { key: 't', className: 'dvv-notice-title' }, '还没有收藏的片段'),
+          h('div', { key: 'd', className: 'dvv-note' }, '在「原文」里点每行右边的 ☆ 就能收进来。'),
+        ]));
+      } else {
+        parts.push(h('div', { key: 'list', className: 'dvv-bm-list' }, items.map((item, index) => h('div', { key: item.id || index, className: 'dvv-bm-row' }, [
+          h('button', { key: 'time', type: 'button', className: 'dvv-bm-time', title: `跳到 ${formatClock(item.start)} 播放`, onClick: () => { const start = Number(item.start); if (Number.isFinite(start) && onSeek) onSeek(start); } }, bookmarkClock(item)),
+          h('div', { key: 'body', className: 'dvv-bm-body' }, [
+            item.label ? h('div', { key: 'l', className: 'dvv-bm-label' }, String(item.label)) : null,
+            h('div', { key: 'x', className: 'dvv-bm-text', title: item.text || '' }, item.text || ''),
+          ].filter(Boolean)),
+          h('div', { key: 'act', className: 'dvv-actions dvv-bm-actions' }, [
+            h('button', { key: 'c', type: 'button', className: 'dvv-btn', onClick: () => { if (onCopy) onCopy(item); } }, '复制'),
+            h('button', { key: 'd', type: 'button', className: 'dvv-btn', 'data-danger': 'true', onClick: () => { if (onRemove) onRemove(item); } }, '删除'),
+          ]),
+        ]))));
+      }
+      return h('div', { className: 'dvv-tabpane dvv-bm' }, parts);
     }
 
     /* -------------------------------------------------------------- 追问对话框 */
@@ -2062,6 +2146,7 @@ window.__ModuleLoader__.load({
       const [mmExpanded, setMmExpanded] = useState({});
       const [storyboard, setStoryboard] = useState(EMPTY_STORYBOARD);
       const [sbDescribe, setSbDescribe] = useState(false);
+      const [bookmarks, setBookmarks] = useState(EMPTY_BOOKMARKS);
 
       const mounted = useRef(true);
       /** 同一时刻只允许一条在途请求（解析或流式），切视频 / 新请求前 abort。 */
@@ -2331,6 +2416,7 @@ window.__ModuleLoader__.load({
         setTranscribe(EMPTY_TRANSCRIBE);
         setStoryboard(EMPTY_STORYBOARD);
         setSbDescribe(false);
+        setBookmarks(EMPTY_BOOKMARKS);
       }, []);
 
       /** 把 host 返回的 doc.analysis 回填到面板状态（summary / chapters / mindmap / chat）。 */
@@ -2757,6 +2843,68 @@ window.__ModuleLoader__.load({
         showToast('已取消生成分镜');
       }, [abortActive, showToast]);
 
+      const loadBookmarks = useCallback(async (video) => {
+        const target = video || docRef.current;
+        if (!target || !target.docId) return;
+        setBookmarks((current) => ({ ...current, loading: true, error: '' }));
+        try {
+          const value = await call('bookmarks', { docId: target.docId });
+          if (!mounted.current || docRef.current !== target) return;
+          setBookmarks({ loading: false, loaded: true, error: '', items: Array.isArray(value && value.items) ? value.items : [] });
+        } catch (caught) {
+          if (!mounted.current || docRef.current !== target) return;
+          setBookmarks({ loading: false, loaded: false, error: friendlyBookmarkError(caught, '加载收藏'), items: [] });
+        }
+      }, []);
+
+      const addBookmark = useCallback(async (segment) => {
+        const target = docRef.current;
+        if (!target || !target.docId) return;
+        const start = Number(segment && segment.start), end = Number(segment && segment.end);
+        const text = String(segment && segment.text ? segment.text : '').trim();
+        if (!Number.isFinite(start) || !text) { showToast('这段字幕不能收藏'); return; }
+        try {
+          const result = await post('bookmarks/add', { docId: target.docId, start, end: Number.isFinite(end) ? end : undefined, text });
+          showToast(result && result.duplicate ? '这一段已经收藏过了' : `已收藏 ${formatClock(start)}`);
+          void loadBookmarks(target);
+        } catch (caught) {
+          showToast(friendlyBookmarkError(caught, '收藏'));
+        }
+      }, [showToast, loadBookmarks]);
+
+      const removeBookmark = useCallback(async (item) => {
+        const target = docRef.current;
+        if (!target || !target.docId || !item || !item.id) return;
+        try {
+          const value = await post('bookmarks/remove', { docId: target.docId, id: item.id });
+          if (!mounted.current || docRef.current !== target) return;
+          setBookmarks((current) => ({ ...current, loaded: true, error: '', items: Array.isArray(value && value.items) ? value.items : current.items.filter((entry) => entry.id !== item.id) }));
+          showToast('已删除这条片段');
+        } catch (caught) {
+          showToast(friendlyBookmarkError(caught, '删除'));
+        }
+      }, [showToast]);
+
+      const clearBookmarks = useCallback(async () => {
+        const target = docRef.current;
+        if (!target || !target.docId) return;
+        try {
+          await post('bookmarks/clear', { docId: target.docId });
+          if (!mounted.current || docRef.current !== target) return;
+          setBookmarks({ loading: false, loaded: true, error: '', items: [] });
+          showToast('已清空片段收藏');
+        } catch (caught) {
+          showToast(friendlyBookmarkError(caught, '清空'));
+        }
+      }, [showToast]);
+
+      /** 片段懒加载：解析后打开「原文」或「片段」页签时才拉取（未加载/无错误时）。 */
+      useEffect(() => {
+        if (!doc || (tab !== 'transcript' && tab !== 'bookmarks')) return;
+        if (bookmarks.loading || bookmarks.loaded || bookmarks.error) return;
+        void loadBookmarks(doc);
+      }, [tab, doc, bookmarks.loading, bookmarks.loaded, bookmarks.error, loadBookmarks]);
+
       /* ---- 原文双语对照：GET /translate 读缓存，没有就 POST SSE 生成（独立取消，不打断其它请求） ---- */
 
       const loadTranslation = useCallback(async (video, lang, options) => {
@@ -2935,6 +3083,7 @@ window.__ModuleLoader__.load({
           setMmExpanded({});
           setStoryboard(EMPTY_STORYBOARD);
           setSbDescribe(false);
+          setBookmarks(EMPTY_BOOKMARKS);
           // host 0.4.0：doc 可能带分析缓存（summary / chapters / mindmap / chat），有缓存就直接回填。
           const cache = readCachedAnalysis(video);
           if (cache) {
@@ -3127,6 +3276,16 @@ window.__ModuleLoader__.load({
             onToggleFollow: () => setFollow((value) => !value),
             onCancelTranslate: cancelTranslation,
             onRetryTranslate: () => { void loadTranslation(doc, translateTarget, { force: true }); },
+            bookmarkMap: buildBookmarkMap(bookmarks.items),
+            onToggleBookmark: addBookmark,
+          });
+        } else if (tab === 'bookmarks') {
+          tabBody = h(BookmarksTab, {
+            bookmarks, onSeek: seekTo,
+            onCopy: (item) => { void copy(bookmarkCopyText(item), '已复制片段'); },
+            onRemove: (item) => { void removeBookmark(item); },
+            onClear: () => { void clearBookmarks(); },
+            onRetry: () => { void loadBookmarks(docRef.current); },
           });
         } else if (tab === 'mindmap') {
           tabBody = h(MindmapTab, {
@@ -3166,6 +3325,7 @@ window.__ModuleLoader__.load({
         setMmExpanded({});
         setStoryboard(EMPTY_STORYBOARD);
         setSbDescribe(false);
+        setBookmarks(EMPTY_BOOKMARKS);
         setChat([]);
         chatRef.current = [];
         setAskInput('');
@@ -3394,6 +3554,18 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-seg-time{flex:none;min-width:46px;font-size:12px;line-height:20px;color:var(--dsw-alias-brand-primary);font-variant-numeric:tabular-nums}
 .dvv-seg-text{flex:1;min-width:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);word-break:break-word}
 .dvv-seg:hover .dvv-seg-text{color:var(--dsw-alias-label-primary,inherit)}
+.dvv-seg-bm{flex:none;margin-left:auto;padding:0 4px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:0;transition:opacity .15s ease}
+.dvv-seg:hover .dvv-seg-bm,.dvv-seg:focus-visible .dvv-seg-bm,.dvv-seg[data-current="true"] .dvv-seg-bm{opacity:1}
+.dvv-seg-bm[data-on="true"]{opacity:1;color:var(--dsw-alias-state-warn-primary)}
+.dvv-bm-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px}
+.dvv-bm-bar-title{font-size:13px;font-weight:650}
+.dvv-bm-list{display:flex;flex-direction:column;gap:8px}
+.dvv-bm-row{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
+.dvv-bm-time{flex:none;margin-top:1px;padding:1px 7px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-brand-primary);font:inherit;font-size:11px;line-height:18px;font-variant-numeric:tabular-nums;cursor:pointer;white-space:nowrap}
+.dvv-bm-body{flex:1;min-width:0}
+.dvv-bm-label{margin-bottom:2px;font-size:11px;line-height:16px;color:var(--dsw-alias-brand-primary)}
+.dvv-bm-text{font-size:13px;line-height:19px;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.dvv-bm-actions{flex:none;margin:0;gap:6px}
 .dvv-chat{display:flex;flex-direction:column;gap:10px;padding:4px 0 8px}
 .dvv-bubble{max-width:86%;border-radius:12px;padding:8px 12px;font-size:13px;line-height:22px;white-space:pre-wrap;word-break:break-word}
 .dvv-bubble[data-role="user"]{align-self:flex-end;background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-base,Canvas);border-bottom-right-radius:4px}
