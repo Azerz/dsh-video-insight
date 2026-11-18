@@ -477,7 +477,7 @@ resolve → transcript（没字幕时本地转写/OCR/画面理解）→ summary
         → storyboard（抽帧 + 拼分镜，不调视觉模型）→ outline visuals（可选，视觉模型逐条描述）
 ```
 
-- 并发数 `jobs.concurrency`（默认 2，1–6）；同一 `docId` 不会重复排队。
+- 并发数 `jobs.concurrency`：`0` = 不限制（默认，提交几个跑几个），正整数限制上限（最大 16）；同一 `docId` 不会重复排队。
 - 任务进度只存在内存里（host 重启后清空），分析结果本身照常写进 `~/.dsh/video-analyses`、`video-storyboards`、`video-outlines`。
 - 非致命步骤（分镜、画面描述）失败只记 `warnings`，任务仍算成功；LLM 步骤空响应/限流会自动重试 3 次。
 - 只传 `docId` 时如果解析缓存已过期，host 会回历史记录里找链接。
@@ -485,7 +485,7 @@ resolve → transcript（没字幕时本地转写/OCR/画面理解）→ summary
 `GET /jobs` 返回：
 
 ```json
-{"ok":true,"value":{"concurrency":2,"active":1,"running":1,
+{"ok":true,"value":{"concurrency":0,"active":1,"running":1,
   "jobs":[{"id":"job-...","docId":"youtube:iG9CE55wbtY","url":"https://...","title":"...",
            "status":"running","stage":"mindmap","stageLabel":"正在生成思维导图…","percent":60,
            "describe":true,"error":"","warnings":[],"queuedAt":1794979516347,"startedAt":1794979516347,"finishedAt":0}]}}
