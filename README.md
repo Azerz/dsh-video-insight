@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#已知限制)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.8.4-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.8.5-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -30,7 +30,7 @@
 | 原文 | 字幕逐段列表（`[mm:ss] 文本`），可搜索过滤、点单条复制、一键复制全文；「双语」开关把每段翻译成中文/英文（`POST /translate`，按批送模型、结果按视频缓存），开启「跟随」后播放器播到哪、对应段落就高亮滚到视野里（时间轴同步由播放器外壳每秒回传） |
 | 思维导图 | 模型把字幕整理成 3 层树状大纲（`GET /mindmap`，带缓存），面板渲染成 **SVG 图形化横向树**（节点卡片 + 贝塞尔连线、按分支配色），点节点折叠/展开，支持全部展开/收起、缩放、重新生成；节点上带可点的时间徽标（模型按字幕定位），点一下跳到视频对应位置 |
 | 关键画面 | 关键画面总览（PPT 模式）：与章节共用同一份大纲（`GET /outline`），一屏看到每章的代表画面；点「生成画面描述」让视觉模型一次性看完这套画面并给每章写一句描述（`POST /outline/visuals`，拼图后只发一张图），描述按视频缓存，章节页签也复用；点一张跳到那个画面并继续播放 |
-| 分镜 | 按镜头切点抽帧、拼成一张**分镜拼图**（`POST /storyboard`，默认 24 格按 3 列排；行数按帧数自动），每格左上角标时间；点任意一格跳到那个画面并继续播放。可选「附画面描述」让视觉模型给每格写一句描述（悬停格子可见）。图片按视频缓存在 `~/.dsh/video-storyboards/`，切回页签秒开；低清视频和镜头切点也按视频缓存在 `~/.dsh/video-assets/`，转写、画面理解、分镜共用同一份，第二次打开页签不再重新下载 |
+| 分镜 | 按镜头切点抽帧、拼成**分镜拼图**（`POST /storyboard`，3 列；**帧数与张数按视频时长和剪辑密度自动定**：默认约每 20 秒一帧，一张最多 24 格，超过自动分成 2 张），每格左上角标时间；点任意一格跳到那个画面并继续播放。可选「附画面描述」让视觉模型逐张给每格写一句描述（悬停格子可见）。图片按视频缓存在 `~/.dsh/video-storyboards/`，切回页签秒开；低清视频和镜头切点也按视频缓存在 `~/.dsh/video-assets/`，转写、画面理解、分镜共用同一份，第二次打开页签不再重新下载 |
 | 追问 | 左栏下方对话框：基于转写稿的 RAG 多轮问答（检索相关段落后再回答），回答带 `[mm:ss]`，下方「依据」chip 可点击跳转；对话按视频缓存。空态先给固定三句，再给 **AI 根据本视频总结生成的 3 条建议追问**（虚线 chip，点一下直接问） |
 | 设置 | 填 B 站 Cookie（SESSDATA），保存到 `~/.dsh/video-credentials.json`（0600）；可清除 |
 | 历史 | 最近 100 条解析/分析记录（可搜索、可收藏星标），存在 `~/.dsh/video-history.json`（跨浏览器、跨重启都在），点击重新打开，可单条删除或清空 |
@@ -90,7 +90,7 @@ curl -L -o ggml-large-v3-turbo-q5_0.bin \
 1. yt-dlp 下载 480p 以内的视频；
 2. **按镜头切点抽帧**（`frameSampling: cuts`，默认）：先扫一遍画面找剪辑点，一个镜头取一张，再按时间轴等分补齐（镜头太少时退化成均匀铺满）；切分失败会自动退回「每 `ocrIntervalSeconds` 秒抽一帧」（`frameSampling: uniform`）。阈值 `cutThreshold` 默认 27，越高只抓越明显的转场；扫描只多一次 64×36 解码（实测 10 分钟片子约 4 秒），抽帧按时间点精确定位；
 3. **本机 OCR**：用 macOS 自带的 Vision 框架离线识别中英文文字（首次使用会把一个小工具编译到 `~/.dsh/video-tools/ocr/`，约 10-20 秒，之后复用），完全不出本机；
-4. **画面理解（可选）**：把抽样的若干帧（默认最多 48 帧）**拼成一张分镜图**（`visionPack: sheet`，默认 3 列、行数按帧数自动算）再交给支持图片输入的模型，让它按「第几格 = 第几秒」逐格描述场景、人物/物体、动作和画面文字；拼图失败会自动回落到逐帧发送（`visionPack: frames`）。默认 `frameMode: auto` 时，只有 OCR 平均每帧不足 4 字（比如纯动画、vlog）才追加这一轮；
+4. **画面理解（可选）**：把抽样的若干帧（帧数按时长自动定，默认约每 20 秒一帧、最多 96 帧；每 24 帧拼一张，可放多张）**拼成一张分镜图**（`visionPack: sheet`，默认 3 列、行数按帧数自动算）再交给支持图片输入的模型，让它按「第几格 = 第几秒」逐格描述场景、人物/物体、动作和画面文字；拼图失败会自动回落到逐帧发送（`visionPack: frames`）。默认 `frameMode: auto` 时，只有 OCR 平均每帧不足 4 字（比如纯动画、vlog）才追加这一轮；
 5. 合并成带时间戳的文字稿：有画面描述时 `source: frame-vision`（视觉模型），只有本机文字时 `source: frame-ocr`；后续总结、章节、思维导图、追问都能用。
 
 **为什么拼成一张图**：逐帧发时 12 帧就是 3 次请求、24 帧是 6 次，每张图都单独占一份图片 token；拼图后 24 帧只用 1 次请求、1 张图。实测同一段素材（Big Buck Bunny，24 帧）：输入 token 13,312 → 1,905（−86%），耗时 66.0s → 26.9s（−59%），描述覆盖度与逐帧基本一致；12 帧时也分别是 −73% 和 −38%。
@@ -157,9 +157,9 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | POST | `/dsh-video/api/transcribe` | SSE：`{url?/docId?, force?}`，帧 `phase` / `progress{percent,stage}` / `done{docId,transcript,cached?}` / `error{code,message}`；无语音时自动兜底 OCR / 画面理解（stage 含 `vision`） |
 | POST | `/dsh-video/api/analyze` | SSE：`{mode:'summary'\|'ask', url?/docId?, question?, history?}`，帧 `phase` / `delta` / `done` / `error` |
 | POST | `/dsh-video/api/chapters` | `{url?/docId?}` → `{ok,value:{chapters:[{start,title,gist}],duration}}` |
-| GET | `/dsh-video/api/storyboard?docId=` | 取缓存的分镜：`{ok,value:{docId,url,title,platform,duration,generatedAt,tookMs,frameSampling,cuts,frames,cols,rows,cellWidth,cellHeight,described,cells:[{index,row,col,seconds,description?}]}}\|null` |
-| GET | `/dsh-video/api/storyboard/image?docId=` | 分镜拼图 `image/jpeg`（`no-store`）；没生成过返回 `{code:'not-found'}` |
-| POST | `/dsh-video/api/storyboard` | SSE：`{docId?/url?, frames?:24, cols?:3, describe?:boolean, force?:boolean}`，帧 `phase` / `progress{stage:download\|scan\|frames,percent}` / `done{cached,docId,storyboard}` / `error{code,message}` |
+| GET | `/dsh-video/api/storyboard?docId=` | 取缓存的分镜：`{ok,value:{docId,url,title,platform,duration,generatedAt,tookMs,frameSampling,cuts,frames,budget?,cols,rows,cellWidth,cellHeight,sheets:[{index,cols,rows,cellWidth,cellHeight,cells}],described,cells:[{index,sheet,row,col,seconds,description?}]}}\|null` |
+| GET | `/dsh-video/api/storyboard/image?docId=&sheet=` | 第 N 张分镜拼图（`sheet` 从 0 开始，默认 0）`image/jpeg`（`no-store`）；没生成过返回 `{code:'not-found'}` |
+| POST | `/dsh-video/api/storyboard` | SSE：`{docId?/url?, frames?:0, cols?:3, describe?:boolean, force?:boolean}`（`frames: 0/缺省` = 按时长自动预算），帧 `phase` / `progress{stage:download\|scan\|frames,percent}` / `done{cached,docId,storyboard}` / `error{code,message}` |
 | POST | `/dsh-video/api/storyboard/clear` | `{docId}` 删掉该视频的分镜（json + jpg） |
 | POST | `/dsh-video/api/history/favorite` | `{docId, favorite}` 历史列表星标：返回 `{ok,value:{items}}`（重新解析不会冲掉） |
 | GET | `/dsh-video/api/outline?docId=` | 章节/关键画面共用的大纲：`{ok,value:{docId,duration,source:'mindmap'\|'chapters'\|'uniform',signature,visuals,items:[{seconds,title,detail,description}]}}`；`visuals` 是已缓存的画面描述（没有则 null） |
@@ -239,10 +239,24 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 - 按镜头抽帧时，画面文字段的「结束时间」按相邻帧间隔的中位数估算（各帧自身的秒数是准的），时间轴粗一点但不会串行；
 - 语音转写与画面分析**并行**：`crossCheck` 默认开启，`POST /transcribe` 一开始就同时下载音频和低清视频、跑 whisper 与抽帧识别，两路结果合并成一份稿子（画面描述带「画面：」前缀）互相印证；显式设 `crossCheck: false` 才回到「先语音、没有语音再看画面」的顺序。
 - 画面文字识别：只在 macOS 可用（依赖系统 Vision 框架）；识别质量取决于画面文字是否清晰，滚动弹幕/花哨字体容易出错；抽帧默认按镜头切点（找不到切点时均匀铺满），因此长视频的覆盖密度取决于镜头数量而不是固定间隔。
+### 帧数是怎么定的
+
+不再固定 24 帧。`lib/budget.js` 按「时长 + 剪辑密度」算预算（参考 dsh-video-storyboard 的窗口思路）：
+
+| 情况 | 密度 | 例 |
+|---|---|---|
+| 常规节奏 | 每 20 秒 1 帧 | 20 分钟 → 60 帧（分 3 张拼图，受上限裁到 48 帧 / 2 张） |
+| 剪辑密集（平均 <8 秒一个镜头） | 每 12 秒 1 帧 | 3.5 分钟 MV → 28 帧 / 2 张 |
+| 长镜头 / 口播（平均 >45 秒一个镜头） | 每 30 秒 1 帧 | 1 小时讲座 → 96 帧（上限） |
+
+- 下限 6 帧、上限 `visionMaxFrames`（默认 96，可调到 240）；
+- 镜头数也参与：至少接近「一镜半帧」，碎剪的片子不会因为时长预算被削平；
+- 一张拼图最多 24 格，超出的自动分第二张，视觉模型逐张描述后合并。
+
 - 画面理解：需要当前（或设置里指定的）模型声明 `image` 输入能力；会把拼好的分镜图发给模型（与 OCR 的本机离线不同）；默认一张图装 9–24 格，所以按「张」而不是按「帧」计费（比逐帧省很多），单次生成仍要 15–30s；画面里既没字也没可描述内容时仍会得到 `asr-empty`。
 - 本地转写：Whisper 首次加载 574MB 模型约 6–12 秒（每次调用固定成本，长视频占比可忽略）；SenseVoice 段级时间戳是按标点聚合的近似值；`threads: 0` 交给引擎自己决定（whisper.cpp 默认 4）。
 - 双语对照：翻译按批调用当前模型（40 段 / 3200 字一批），长视频要十几批、每批几秒；译文质量和模型相关；「跟随播放」高亮依赖播放器外壳回传时间，目前只有 YouTube 内嵌播放器会发，B 站播放器拿不到播放进度（不报错、不高亮）。
-- 分镜：一个视频只保留一张分镜图（最多 24 格），第一次生成要下 480p + 跑一遍切点扫描（10 分钟片子约 10–20 秒）；低清视频与切点会按视频缓存（`~/.dsh/video-assets/`，最多 8 个 / 2GB / 30 天），之后转写、画面理解、分镜都复用，重新生成约 1 秒；「附画面描述」会调用视觉模型，图片会离开本机。
+- 分镜：最多 2 张拼图 / 48 格（20 分钟片子约 46 格），第一次生成要下 480p + 跑一遍切点扫描（10 分钟片子约 10–20 秒）；低清视频与切点会按视频缓存（`~/.dsh/video-assets/`，最多 8 个 / 2GB / 30 天），之后转写、画面理解、分镜都复用，重新生成约 1 秒；「附画面描述」会调用视觉模型，图片会离开本机。
 - 只支持单条链接，不做播放列表 / 合集递归。
 
 ## 开发与自测

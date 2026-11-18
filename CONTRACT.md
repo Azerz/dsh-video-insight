@@ -13,7 +13,7 @@ const API_BASE = new URL('dsh-video/api/', document.baseURI).toString();
 
 ```json
 { "ok": true, "value": {
-  "version": "0.8.4",
+  "version": "0.8.5",
   "model": { "provider": "opencode-go", "model": "deepseek-v4.1-flash" },
   "bilibili": { "cookie": false },
   "platforms": { "youtube": true, "bilibili": true },
@@ -352,23 +352,27 @@ data: {"type":"error","code":"asr-needs-ytdlp","message":"…"}
 
 把视频按**镜头切点**抽帧、拼成一张带时间戳的分镜拼图，供面板「分镜」页签显示、点格子 seek。图片与元数据按视频缓存在 `~/.dsh/video-storyboards/`：
 
-- 文件：`<safeId(docId)>.jpg`（拼图）+ `<safeId(docId)>.json`（元数据）。`safeId` 把非 `[A-Za-z0-9_-]` 字符换成 `_`，截 160 字符。清掉任意一个即视为没有缓存。
-- 生成流程（host 内部）：`captureFrames`（yt-dlp 下 ≤480p、ffmpeg 4fps 64×36 rawvideo 扫切点、按镜头取 ≤24 帧）→ `buildContactSheet`（ffmpeg `tile` 拼 3 列 × 自动行数，格子 512×288）→ 复制 jpg 落盘 →（可选）`describeSheet` 让视觉模型逐格描述并把 `description` 合并进 cells → 原子写 JSON。
+- 文件：`<safeId(docId)>-<n>.jpg`（第 n 张拼图，从 1 开始；旧版单图是 `<safeId(docId)>.jpg`）+ `<safeId(docId)>.json`（元数据）。`safeId` 把非 `[A-Za-z0-9_-]` 字符换成 `_`，截 160 字符。清掉任意一个即视为没有缓存。
+- 帧数与张数（`lib/budget.js`）：按「时长 + 剪辑密度」自动算预算——默认每 20 秒一帧（碎剪 <8s/镜头 → 每 12 秒；长镜头 >45s/镜头 → 每 30 秒），下限 6、上限 `min(48, 请求值)`；镜头数也参与（至少接近「一镜半帧」）。一张拼图最多 24 格，超出自动分第 2 张（最多 2 张 / 48 格）。
+- 生成流程（host 内部）：`captureFrames`（yt-dlp 下 ≤480p、ffmpeg 4fps 64×36 rawvideo 扫切点、按预算取帧、按 24 帧分块）→ `buildContactSheet`（ffmpeg `tile` 拼 3 列 × 自动行数，格子 512×288）→ 复制 jpg 落盘 →（可选）`describeSheet` 让视觉模型逐格描述并把 `description` 合并进 cells → 原子写 JSON。
 - JSON 形状：
   ```json
   {
     "docId": "youtube:aqz-KE-bpKQ", "url": "…", "title": "…", "platform": "youtube",
-    "duration": 634, "generatedAt": 1794981000000, "tookMs": 9200,
-    "frameSampling": "cuts", "cuts": 146, "frames": 24,
-    "cols": 3, "rows": 8, "cellWidth": 512, "cellHeight": 288, "described": false,
-    "cells": [{"index": 1, "row": 0, "col": 0, "seconds": 8}, {"index": 2, "row": 0, "col": 1, "seconds": 33.38}]
+    "duration": 1203, "generatedAt": 1794981000000, "tookMs": 9200,
+    "frameSampling": "cuts", "cuts": 150, "frames": 46,
+    "budget": {"frames": 48, "secondsPerFrame": 20, "sheets": 2, "cellsPerSheet": 24, "density": "normal", "duration": 1203, "ceiling": 48, "reason": "1203s · 150 个镜头 · 每 20s 一帧 · 常规节奏 · 48 帧 / 2 张图"},
+    "cols": 3, "rows": 8, "cellWidth": 512, "cellHeight": 288,
+    "sheets": [{"cols": 3, "rows": 8, "cellWidth": 512, "cellHeight": 288, "cells": 24}],
+    "described": false,
+    "cells": [{"index": 1, "sheet": 0, "row": 0, "col": 0, "seconds": 8}, {"index": 2, "sheet": 0, "row": 0, "col": 1, "seconds": 33.38}]
   }
   ```
-  `seconds` 是该格画面的绝对秒数（它在原视频里的时间），`row/col` 从 0 开始。有 `describe` 时每格多一个 `description`（≤160 字）。
+  `seconds` 是该格画面的绝对秒数（它在原视频里的时间），`row/col` 从 0 开始，`sheet` 是它属于第几张拼图（0 起）。有 `describe` 时每格多一个 `description`（≤160 字）。顶层 `cols/rows` 是第一张图的尺寸（兼容旧客户端）。
 - `GET /storyboard?docId=<docId>` → `{ok:true, value:<上面的对象>|null}`；缓存缺失/损坏返回 `value:null`。
-- `GET /storyboard/image?docId=<docId>` → `image/jpeg`（`cache-control: no-store`）；没有缓存时 `404 {ok:false,code:'not-found'}`。客户端要用 `?v=<generatedAt>` 破缓存。
+- `GET /storyboard/image?docId=<docId>&sheet=<n>` → `image/jpeg`（`cache-control: no-store`，`sheet` 从 0 开始、默认 0）；没有缓存时 `404 {ok:false,code:'not-found'}`。客户端要用 `?v=<generatedAt>` 破缓存。
 - `POST /storyboard/clear` body `{docId}` → `{ok:true}`（删 json + jpg）。
-- `POST /storyboard`（SSE）body `{docId?/url?, frames?:24, cols?:3, describe?:boolean, force?:boolean}`：
+- `POST /storyboard`（SSE）body `{docId?/url?, frames?:0, cols?:3, describe?:boolean, force?:boolean}`（`frames: 0/缺省` = 按预算自动）：
   - 未 force 且已有缓存、且（没要 `describe` 或缓存本来就 `described`）→ 直接 `done cached:true`；
   - 帧：`{type:'phase',text}`、`{type:'progress',stage:'download'|'scan'|'frames',percent}`、`{type:'done',cached:false,docId,storyboard}`、`{type:'error',code,message}`；
   - 错误码：`bad-url`、`unsupported`、`ocr-needs-ytdlp`、`ocr-no-ffmpeg`、`ocr-empty`、`sheet-empty`、`sheet-failed`、`vision-*`、`aborted`、`internal`。
