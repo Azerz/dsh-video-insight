@@ -1015,7 +1015,7 @@ window.__ModuleLoader__.load({
       ]);
     }
 
-    function ChaptersTab({ outline, doc, currentSeconds, view, onView, onSeek, onRetry, onGenerate, onCancel }) {
+    function ChaptersTab({ outline, doc, currentSeconds, view, onView, onSeek, onRetry, onGenerate, onCancel, hint, titlesBusy, onGenerateTitles, onGoMindmap }) {
       if (!doc) return h('div', { className: 'dvv-tabpane' }, h('div', { className: 'dvv-empty-note' }, '先解析一个视频，再来看章节。'));
       if (outline.loading) {
         return h('div', { className: 'dvv-tabpane' }, h('div', { className: 'dvv-chlist' },
@@ -1046,6 +1046,22 @@ window.__ModuleLoader__.load({
           outline.genLoading ? '生成中…' : visuals ? '重新生成描述' : '生成画面描述'),
       ].filter(Boolean));
       const parts = [bar];
+      const hintText = String(hint || '').trim();
+      if (hintText) {
+        parts.push(h('div', { key: 'hint', className: 'dvv-outline-hint', role: 'status' }, [
+          h('span', { key: 't', className: 'dvv-outline-hint-text' }, hintText),
+          h('div', { key: 'a', className: 'dvv-outline-hint-actions' }, [
+            h('button', {
+              key: 'gen', type: 'button', className: 'dvv-btn', 'data-primary': 'true',
+              disabled: Boolean(titlesBusy), onClick: () => { if (typeof onGenerateTitles === 'function') onGenerateTitles(); },
+            }, titlesBusy ? '正在生成…' : '生成章节标题'),
+            h('button', {
+              key: 'mm', type: 'button', className: 'dvv-btn',
+              onClick: () => { if (typeof onGoMindmap === 'function') onGoMindmap(); },
+            }, '去思维导图'),
+          ]),
+        ]));
+      }
       if (outline.genLoading) {
         parts.push(h('div', { key: 'load', className: 'dvv-tr-progress' }, [
           h('span', { key: 'p', className: 'dvv-note' }, outline.genPhase || '正在生成画面描述…'),
@@ -1739,7 +1755,7 @@ window.__ModuleLoader__.load({
         ]),
         h('div', { key: 'body', className: 'dvv-kf-body' }, [
           h('div', { key: 'title', className: 'dvv-kf-title', title }, title || '关键画面'),
-          h('div', { key: 'desc', className: 'dvv-kf-desc', 'data-empty': description ? undefined : 'true' }, description || '还没有描述'),
+          h('div', { key: 'desc', className: 'dvv-kf-desc', 'data-empty': description ? undefined : 'true' }, description || '还没有画面描述'),
         ]),
       ]);
     }
@@ -2221,6 +2237,7 @@ window.__ModuleLoader__.load({
       const [asrNote, setAsrNote] = useState('');
       const [transcribe, setTranscribe] = useState(EMPTY_TRANSCRIBE);
       const [mindmap, setMindmap] = useState(EMPTY_MINDMAP);
+      const [titlesLoading, setTitlesLoading] = useState(false);
       const [mmExpanded, setMmExpanded] = useState({});
       const [storyboard, setStoryboard] = useState(EMPTY_STORYBOARD);
       const [sbDescribe, setSbDescribe] = useState(false);
@@ -2231,6 +2248,7 @@ window.__ModuleLoader__.load({
       /** 同一时刻只允许一条在途请求（解析或流式），切视频 / 新请求前 abort。 */
       const active = useRef(null);
       const docRef = useRef(null);
+      const titlesLoadingRef = useRef(false);
       const chatRef = useRef([]);
       const askBusyRef = useRef(false);
       const resolveTicket = useRef(0);
@@ -2829,15 +2847,40 @@ window.__ModuleLoader__.load({
             cachedAt: '',
           });
           setMmExpanded(defaultMindmapExpanded(data));
+          return '';
         } catch (caught) {
-          if (!mounted.current || (caught && caught.name === 'AbortError')) return;
+          if (!mounted.current || (caught && caught.name === 'AbortError')) return '';
+          const message = friendlyMindmapError(caught);
           setMindmap({
             ...EMPTY_MINDMAP,
-            error: friendlyMindmapError(caught),
+            error: message,
             code: String((caught && caught.code) || ''),
           });
+          return message;
         }
       }, []);
+
+      /* ---- 章节兜底（均匀切分）时，一键生成章节标题：先生成思维导图，再刷新大纲 ---- */
+      const generateChapterTitles = useCallback(async (video) => {
+        const target = video ?? docRef.current;
+        if (!target || !target.docId || titlesLoadingRef.current) return;
+        titlesLoadingRef.current = true;
+        setTitlesLoading(true);
+        try {
+          const failure = await loadMindmap(target, false);
+          if (!mounted.current) return;
+          if (failure) {
+            showToast(String(failure));
+            return;
+          }
+          await loadOutline(docRef.current);
+        } catch (caught) {
+          if (mounted.current) showToast(friendlyMindmapError(caught));
+        } finally {
+          titlesLoadingRef.current = false;
+          if (mounted.current) setTitlesLoading(false);
+        }
+      }, [loadMindmap, loadOutline, showToast]);
 
       const toggleMindmapNode = useCallback((path) => {
         setMmExpanded((current) => ({ ...current, [path]: !current[path] }));
@@ -3318,6 +3361,10 @@ window.__ModuleLoader__.load({
             onRetry: () => { void loadOutline(doc); },
             onGenerate: () => { void generateVisuals(doc, Boolean(outline.data && outline.data.visuals)); },
             onCancel: cancelVisuals,
+            hint: outline.data && outline.data.hint ? String(outline.data.hint) : '',
+            titlesBusy: titlesLoading || mindmap.loading,
+            onGenerateTitles: () => { void generateChapterTitles(docRef.current); },
+            onGoMindmap: () => setTab('mindmap'),
           });
         } else if (tab === 'transcript') {
           tabBody = h(TranscriptTab, {
@@ -3761,6 +3808,9 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-sb-meta{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
 .dvv-sb-check{display:flex;align-items:center;gap:4px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);cursor:pointer}
 .dvv-sb-progress{display:flex;flex-direction:column;gap:8px;padding:12px 0}
+.dvv-outline-hint{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 12px;margin:2px 0 10px;border:1px dashed var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-2)}
+.dvv-outline-hint-text{flex:1 1 220px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
+.dvv-outline-hint-actions{display:flex;align-items:center;gap:6px}
 .dvv-sb-wrap{display:flex;flex-direction:column;gap:14px}
 .dvv-sb-sheet{display:flex;flex-direction:column;gap:4px;min-width:0}
 .dvv-sb-cap{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}

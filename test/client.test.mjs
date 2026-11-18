@@ -341,6 +341,12 @@ function fakeFetch(input, init, calls) {
   if (typeof handler === 'function') {
     try {
       const result = handler(call);
+      if (result && typeof result.then === 'function') {
+        return result.then((resolved) => {
+          if (resolved && resolved.__sse) return sseResponse(resolved.__sse, call.signal);
+          return jsonResponse(resolved);
+        });
+      }
       if (result && result.__sse) return Promise.resolve(sseResponse(result.__sse, call.signal));
       return Promise.resolve(jsonResponse(result));
     } catch (error) {
@@ -587,6 +593,20 @@ const OUTLINE_VALUE = {
 let outlineMode = 'ok';
 let storyboardMode = 'single';
 
+const OUTLINE_HINT_VALUE = {
+  docId: 'bilibili:BV1xx411c7mD',
+  duration: BILI_DOC.duration,
+  source: 'uniform',
+  signature: 'sig-hint',
+  visuals: null,
+  hint: '这段视频还没有章节标题：生成思维导图（或 AI 章节）后会自动按内容切分。',
+  items: [
+    { seconds: 0, title: '片段 1', detail: [], description: '' },
+    { seconds: 251, title: '片段 2', detail: [], description: '' },
+    { seconds: 502, title: '片段 3', detail: [], description: '' },
+  ],
+};
+
 const OUTLINE_VISUALS_EVENTS = [
   { type: 'phase', text: '正在准备视频…' },
   { type: 'progress', stage: 'frames', percent: 40 },
@@ -818,10 +838,20 @@ function resetRoutes() {
     chapters: () => ({ ok: true, value: CHAPTERS_VALUE }),
     outline: () => {
       if (outlineMode === 'notfound') return { ok: false, code: 'not-found', error: '这个视频还没有解析分镜。' };
+      if (outlineMode === 'hint' || outlineMode === 'hint-fail' || outlineMode === 'hint-slow') return { ok: true, value: OUTLINE_HINT_VALUE };
       return { ok: true, value: OUTLINE_VALUE };
     },
     'outline/visuals': () => ({ __sse: OUTLINE_VISUALS_EVENTS }),
-    mindmap: () => ({ ok: true, value: MINDMAP_VALUE }),
+    mindmap: () => {
+      if (outlineMode === 'hint-fail') return { ok: false, code: 'llm-failed', error: '模型调用失败' };
+      if (outlineMode === 'hint-slow') {
+        return new Promise((resolve) => {
+          setTimeout(() => { outlineMode = 'ok'; resolve({ ok: true, value: MINDMAP_VALUE }); }, 120);
+        });
+      }
+      if (outlineMode === 'hint') outlineMode = 'ok';
+      return { ok: true, value: MINDMAP_VALUE };
+    },
     analyze: (call) => ({ __sse: call.body && call.body.mode === 'ask' ? ASK_EVENTS : SUMMARY_EVENTS }),
     transcribe: () => ({ __sse: TRANSCRIBE_EVENTS }),
     translate: (call) => {
@@ -1632,6 +1662,66 @@ tree = await settle(60);
 clickText(tree, '分镜');
 tree = await settle(60);
 check('切回视频后恢复单张分镜', allByClass(tree, 'dvv-sb-img').length === 1);
+
+/* ------------------------------------------------ 章节兜底提示 + 一键生成标题 */
+
+outlineMode = 'hint';
+change(byClass(tree, 'dvv-input'), BILI_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-input'), 'Enter');
+tree = await settle(60);
+clickText(tree, '章节');
+tree = await settle(30);
+checkIncludes('章节兜底提示条', nodeText(tree), '还没有章节标题');
+checkIncludes('兜底章节标题为片段', nodeText(tree), '片段 1');
+check('兜底提示条有生成按钮', Boolean(buttonByText(tree, '生成章节标题')));
+check('兜底提示条有去思维导图', Boolean(buttonByText(tree, '去思维导图')));
+
+clickText(tree, '网格');
+tree = await settle();
+check('网格视图也显示兜底提示', Boolean(byClass(tree, 'dvv-outline-hint')));
+checkIncludes('网格卡占位画面描述', nodeText(tree), '还没有画面描述');
+
+clickText(tree, '去思维导图');
+tree = await settle();
+check('去思维导图切换到导图页', Boolean(byClass(tree, 'dvv-mm2-scroll')) || nodeText(tree).includes('当前模型'));
+clickText(tree, '章节');
+tree = await settle(20);
+
+const hintOutlineCallsBefore = callsOf('outline').length;
+const mindmapCallsBefore = callsOf('mindmap').length;
+outlineMode = 'hint-slow';
+clickText(tree, '生成章节标题');
+tree = await settle(2);
+checkIncludes('生成标题按钮 loading 文案', nodeText(tree), '正在生成…');
+const busyTitleBtn = buttonByText(tree, '正在生成…');
+check('生成标题按钮 loading 时禁用', Boolean(busyTitleBtn && busyTitleBtn.props.disabled === true));
+await new Promise((resolve) => setTimeout(resolve, 200));
+tree = await settle(40);
+check('生成标题调用 GET /mindmap', callsOf('mindmap').length > mindmapCallsBefore
+  && callsOf('mindmap').slice(mindmapCallsBefore).every((call) => call.method === 'GET'));
+check('生成后重新 GET /outline', callsOf('outline').length > hintOutlineCallsBefore);
+check('生成后提示条消失', !byClass(tree, 'dvv-outline-hint'));
+checkIncludes('生成后显示真实章节标题', nodeText(tree), '开场');
+
+// 失败：toast 中文提示，提示条保留
+outlineMode = 'hint-fail';
+change(byClass(tree, 'dvv-input'), BILI_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-input'), 'Enter');
+tree = await settle(60);
+clickText(tree, '章节');
+tree = await settle(30);
+check('失败用例先有提示条', Boolean(byClass(tree, 'dvv-outline-hint')));
+clickText(tree, '生成章节标题');
+tree = await settle(30);
+checkIncludes('生成标题失败 toast', nodeText(tree), '生成思维导图失败：模型调用失败');
+check('失败后提示条保留', Boolean(byClass(tree, 'dvv-outline-hint')));
+outlineMode = 'ok';
+change(byClass(tree, 'dvv-input'), BILI_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-input'), 'Enter');
+tree = await settle(60);
 
 /* ---------------------------------------------------------------- 错误与返回 */
 
