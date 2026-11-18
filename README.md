@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#已知限制)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.8.5-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.9.0-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -179,6 +179,11 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | GET | `/dsh-video/api/analysis?docId=` | 取某个视频的分析缓存：`{ok,value:{docId,analysis:{summary,chapters,mindmap,chat}}}` |
 | POST | `/dsh-video/api/analysis/clear` | `{docId}` 清掉该视频全部缓存（总结/章节/导图/对话） |
 | POST | `/dsh-video/api/analysis/chat/clear` | `{docId}` 只清对话 |
+| POST | `/dsh-video/api/jobs` | 开始一个后台解析任务：`{docId?/url?, describe?:true}` → `{ok,value:{job,created}}`；同一视频已在队列里时不重复排队（`created:false`） |
+| GET | `/dsh-video/api/jobs` | 任务队列快照：`{ok,value:{concurrency,active,running,jobs:[{id,docId,url,title,status,stage,stageLabel,percent,describe,error,warnings,queuedAt,startedAt,finishedAt}]}}`（进度条就轮询这个） |
+| POST | `/dsh-video/api/jobs/all` | 批量解析历史里还没分析完的视频：`{limit?:20, force?:false, describe?:true}` → `{ok,value:{started,skipped,jobs}}` |
+| POST | `/dsh-video/api/jobs/cancel` | `{id}` 或 `{docId}` 取消排队/运行中的任务 → `{ok,value:{cancelled,jobs}}` |
+| POST | `/dsh-video/api/jobs/clear` | 清掉已结束的任务记录 |
 | GET | `/dsh-video/api/history` | `{ok,value:{items:[…]}}`，最近 100 条，新的在前（解析/分析成功后 host 自动写入）；带 `hasSummary/hasChapters/hasMindmap/chatCount` 标记 |
 | POST | `/dsh-video/api/history/remove` | `{docId}` 删一条 → `{ok,value:{items}}` |
 | POST | `/dsh-video/api/history/clear` | 清空历史 → `{ok,value:{items:[]}}` |
@@ -225,6 +230,8 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
           visionMaxFrames: 48     # 画面理解最多取几帧
           visionPack: sheet       # sheet=多帧拼一张分镜图（默认，省图省时）| frames=逐帧发
           sheetCols: 3            # 分镜图列数（行数按帧数自动算）
+        jobs:
+          concurrency: 2          # 后台解析同时跑几个（1-6）
 ```
 
 面板「设置」里保存的 Cookie 与本地转写配置都写在 `~/.dsh/video-credentials.json`，**优先级高于**行配置，改完立即生效。

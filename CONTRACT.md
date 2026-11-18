@@ -13,7 +13,7 @@ const API_BASE = new URL('dsh-video/api/', document.baseURI).toString();
 
 ```json
 { "ok": true, "value": {
-  "version": "0.8.5",
+  "version": "0.9.0",
   "model": { "provider": "opencode-go", "model": "deepseek-v4.1-flash" },
   "bilibili": { "cookie": false },
   "platforms": { "youtube": true, "bilibili": true },
@@ -467,3 +467,29 @@ GET /dsh-video/api/outline?docId=<docId>
 | `video` | `action`(resolve/transcribe/summary/ask) / `url`(必填) / `question` / `maxChars` | 文本 |
 
 `video_digest` 的文本结构：`《标题》` / `平台 · 作者 · 时长` / `链接` / `字幕：来源与字数` / （可选）`问：…` / 正文 / `依据：[mm:ss] …` / 官方章节前 8 条 / `注意：warnings`。没有字幕时先本地 ASR，再退画面文字 OCR；两个工具与面板共用 `~/.dsh/video-credentials.json` 里的 B 站 Cookie。工具调用同样会写历史与综合分析缓存：`resolve`/`transcribe` 记 `view`，`summary`/`ask`/`video_digest` 记 `analyze`（summary 与 video_digest 的总结正文还会 `saveSummary` 到 `~/.dsh/video-analyses/`），所以面板「最近分析」与打开视频时的缓存可以直接复用。
+
+## 后台解析任务（jobs）
+
+一次后台解析会按顺序跑完整条管线，不需要再切页签：
+
+```
+resolve → transcript（没字幕时本地转写/OCR/画面理解）→ summary → mindmap
+        → storyboard（抽帧 + 拼分镜，不调视觉模型）→ outline visuals（可选，视觉模型逐条描述）
+```
+
+- 并发数 `jobs.concurrency`（默认 2，1–6）；同一 `docId` 不会重复排队。
+- 任务进度只存在内存里（host 重启后清空），分析结果本身照常写进 `~/.dsh/video-analyses`、`video-storyboards`、`video-outlines`。
+- 非致命步骤（分镜、画面描述）失败只记 `warnings`，任务仍算成功；LLM 步骤空响应/限流会自动重试 3 次。
+- 只传 `docId` 时如果解析缓存已过期，host 会回历史记录里找链接。
+
+`GET /jobs` 返回：
+
+```json
+{"ok":true,"value":{"concurrency":2,"active":1,"running":1,
+  "jobs":[{"id":"job-...","docId":"youtube:iG9CE55wbtY","url":"https://...","title":"...",
+           "status":"running","stage":"mindmap","stageLabel":"正在生成思维导图…","percent":60,
+           "describe":true,"error":"","warnings":[],"queuedAt":1794979516347,"startedAt":1794979516347,"finishedAt":0}]}}
+```
+
+`status`：`queued` / `running` / `done` / `failed` / `cancelled`；`percent` 0–100（`done` 为 100）。
+
