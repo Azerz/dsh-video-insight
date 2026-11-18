@@ -585,6 +585,7 @@ const OUTLINE_VALUE = {
   ],
 };
 let outlineMode = 'ok';
+let storyboardMode = 'single';
 
 const OUTLINE_VISUALS_EVENTS = [
   { type: 'phase', text: '正在准备视频…' },
@@ -673,6 +674,46 @@ const TRANSCRIBE_EVENTS = [
       segments: [{ start: 0, end: 4, text: '本地转写第一句' }, { start: 4, end: 8, text: '本地转写第二句' }],
     },
   },
+];
+
+const SB_MULTI_VALUE = {
+  docId: 'youtube:seekYT',
+  url: YT_DOC.url,
+  title: YT_DOC.title,
+  platform: 'youtube',
+  duration: 1203,
+  generatedAt: now - 20e3,
+  tookMs: 2400,
+  frameSampling: 'cuts',
+  cuts: 150,
+  frames: 6,
+  cols: 3,
+  rows: 2,
+  cellWidth: 640,
+  cellHeight: 360,
+  described: true,
+  budget: {
+    frames: 48, secondsPerFrame: 20, sheets: 2, cellsPerSheet: 24,
+    density: 'normal', duration: 1203, ceiling: 48,
+    reason: '1203s · 150 个镜头 · 每 20s 一帧 · 常规节奏 · 48 帧 / 2 张图',
+  },
+  sheets: [
+    { index: 0, cols: 3, rows: 2, cellWidth: 640, cellHeight: 360, cells: [] },
+    { index: 1, cols: 3, rows: 2, cellWidth: 640, cellHeight: 360, cells: [] },
+  ],
+  cells: [
+    { index: 0, sheet: 0, row: 0, col: 0, seconds: 0 },
+    { index: 1, sheet: 0, row: 0, col: 1, seconds: 20 },
+    { index: 2, sheet: 0, row: 0, col: 2, seconds: 40 },
+    { index: 3, sheet: 0, row: 1, col: 0, seconds: 60 },
+    { index: 4, sheet: 1, row: 0, col: 0, seconds: 500, description: '第二张第一格' },
+    { index: 5, sheet: 1, row: 1, col: 2, seconds: 700 },
+  ],
+};
+
+const SB_MULTI_EVENTS = [
+  { type: 'phase', text: '正在扫描镜头…' },
+  { type: 'done', cached: false, docId: 'youtube:seekYT', storyboard: SB_MULTI_VALUE },
 ];
 
 const STORYBOARD_EVENTS = [
@@ -790,7 +831,7 @@ function resetRoutes() {
     },
     storyboard: (call) => {
       if (call.method === 'GET') return { ok: true, value: null };
-      return { __sse: STORYBOARD_EVENTS };
+      return { __sse: storyboardMode === 'multi' ? SB_MULTI_EVENTS : STORYBOARD_EVENTS };
     },
     'storyboard/clear': (call) => ({ ok: true, value: { docId: call.body && call.body.docId } }),
     keyframes: (call) => {
@@ -1245,7 +1286,8 @@ clickText(tree, '分镜');
 tree = await settle();
 check('切到分镜先读缓存 GET /storyboard', callsOf('storyboard').some((call) => call.method === 'GET'));
 check('没有缓存时自动 POST 生成分镜', callsOf('storyboard').some((call) => call.method === 'POST'));
-checkIncludes('分镜工具条帧数', nodeText(tree), '4 格 · 2×2');
+checkIncludes('分镜工具条帧数', nodeText(tree), '4 帧 · 1 张');
+checkIncludes('分镜单张说明', nodeText(tree), '第 1/1 张 · 2×2 格');
 checkIncludes('分镜格子时间戳', nodeText(tree), '0:00');
 const sbCells = allByClass(tree, 'dvv-sb-cell');
 check('分镜渲染 4 个格子', sbCells.length === 4);
@@ -1529,6 +1571,67 @@ check('大纲重试后恢复列表', allByClass(tree, 'dvv-ch').length === 2);
 change(byClass(tree, 'dvv-input'), BILI_DOC.url);
 keydown(byClass(tree, 'dvv-input'), 'Enter');
 tree = await settle(60);
+
+/* ------------------------------------------------ 历史抽屉不置灰 + 多张分镜 */
+
+// 历史抽屉：overlay 不压暗、抽屉自身阴影
+clickText(tree, '历史');
+tree = await settle();
+const histOverlay = byClass(tree, 'dvv-overlay');
+check('历史抽屉 overlay 带 data-quiet', Boolean(histOverlay && histOverlay.props['data-quiet'] === 'true'));
+check('历史抽屉 overlay 样式透明', /\.dvv-overlay\[data-quiet="true"\]\{background:transparent\}/.test(styleTag.textContent));
+check('历史抽屉自身有阴影', /\.dvv-drawer\{[^}]*box-shadow:-10px 0 32px/.test(styleTag.textContent));
+clickText(tree, '关闭');
+tree = await settle();
+
+// 设置弹窗保持原样（overlay 仍然压暗）
+clickText(tree, '设置');
+tree = await settle();
+const settingsOverlay = byClass(tree, 'dvv-overlay');
+check('设置弹窗 overlay 不置 quiet', Boolean(settingsOverlay) && settingsOverlay.props['data-quiet'] === undefined);
+clickText(tree, '关闭');
+tree = await settle();
+
+// 多张分镜：按 sheets 逐张渲染
+storyboardMode = 'multi';
+change(byClass(tree, 'dvv-input'), YT_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-input'), 'Enter');
+tree = await settle(60);
+check('切视频后旧分镜已清空', allByClass(tree, 'dvv-sb-img').length === 0);
+clickText(tree, '分镜');
+tree = await settle(60);
+const sbImgs = allByClass(tree, 'dvv-sb-img');
+check('多张分镜渲染两张图', sbImgs.length === 2);
+const sbSrc0 = String((sbImgs[0] || {}).props?.src || '');
+const sbSrc1 = String((sbImgs[1] || {}).props?.src || '');
+check('第一张 URL 带 sheet=0', sbSrc0.includes('&sheet=0'));
+check('第二张 URL 带 sheet=1', sbSrc1.includes('&sheet=1'));
+check('分镜按张分组容器', allByClass(tree, 'dvv-sb-sheet').length === 2);
+checkIncludes('多张分镜工具条帧数', nodeText(tree), '6 帧 · 2 张');
+checkIncludes('多张分镜每帧秒数', nodeText(tree), '每 20s 一帧');
+checkIncludes('第一张说明', nodeText(tree), '第 1/2 张 · 3×2 格');
+checkIncludes('第二张说明', nodeText(tree), '第 2/2 张 · 3×2 格');
+const sbCellsAll = allByClass(tree, 'dvv-sb-cell');
+const sheet0Cells = sbCellsAll.filter((node) => node.props['data-sheet'] === '0');
+const sheet1Cells = sbCellsAll.filter((node) => node.props['data-sheet'] === '1');
+check('徽标只渲染所属 sheet（第一张 4 格）', sheet0Cells.length === 4);
+check('徽标只渲染所属 sheet（第二张 2 格）', sheet1Cells.length === 2);
+check('第二张第一格带描述 title', (sheet1Cells[0] || {}).props?.title === '第二张第一格');
+click(sheet1Cells[0]);
+tree = await settle();
+const sbFrame2 = allByTag(tree, 'iframe')[0];
+check('点击第二张格子 seek 到 500s', Boolean(sbFrame2) && sbFrame2.contentWindow.messages.some((msg) => msg && msg.seconds === 500));
+
+// 切回 B 站视频后恢复单张
+storyboardMode = 'single';
+change(byClass(tree, 'dvv-input'), BILI_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-input'), 'Enter');
+tree = await settle(60);
+clickText(tree, '分镜');
+tree = await settle(60);
+check('切回视频后恢复单张分镜', allByClass(tree, 'dvv-sb-img').length === 1);
 
 /* ---------------------------------------------------------------- 错误与返回 */
 

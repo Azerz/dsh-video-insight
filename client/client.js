@@ -1282,11 +1282,12 @@ window.__ModuleLoader__.load({
     /* -------------------------------------------------------------- 分镜 */
 
     /** 分镜图地址：优先 transport 的 http 起源，其次同源相对路径（与播放器外壳一致）。 */
-    function storyboardImageSrc(storyboard, docId) {
+    function storyboardImageSrc(storyboard, docId, sheetIndex) {
       const id = String((storyboard && storyboard.docId) || docId || '').trim();
       if (!id) return '';
       const version = storyboard && storyboard.generatedAt ? String(storyboard.generatedAt) : '';
       let path = `/dsh-video/api/storyboard/image?docId=${encodeURIComponent(id)}`;
+      if (sheetIndex !== undefined && sheetIndex !== null) path += `&sheet=${Math.max(0, Math.floor(Number(sheetIndex) || 0))}`;
       if (version) path += `&v=${encodeURIComponent(version)}`;
       const transport = playerTransportBase();
       return transport ? `${transport}${path}` : path;
@@ -1606,22 +1607,32 @@ window.__ModuleLoader__.load({
 
     /* -------------------------------------------------------------- 分镜 */
 
-    /** 分镜页签：host 拼好的分镜图 + 每格时间戳覆盖层（点击 seek）。 */
+    /** 分镜页签：host 拼好的分镜图（可能多张）+ 每格时间戳覆盖层（点击 seek）。 */
     function StoryboardTab({ doc, storyboard, describe, onDescribe, onGenerate, onCancel, onSeek }) {
-      const [broken, setBroken] = useState(false);
+      const [brokenSheets, setBrokenSheets] = useState({});
       const data = storyboard ? storyboard.data : null;
       const loading = Boolean(storyboard && storyboard.loading);
       const error = storyboard ? storyboard.error : '';
-      useEffect(() => { setBroken(false); }, [data && data.generatedAt]);
+      useEffect(() => { setBrokenSheets({}); }, [data && data.generatedAt]);
       if (!doc) {
         return h('div', { className: 'dvv-tabpane dvv-sb-tab' },
           h('div', { className: 'dvv-empty-note' }, '先解析一个视频，再来看它的分镜。'));
       }
+      const budget = data && data.budget ? data.budget : null;
+      const sheets = data
+        ? (Array.isArray(data.sheets) && data.sheets.length ? data.sheets : [{ index: 0, cols: data.cols, rows: data.rows }])
+        : [];
+      const sheetCount = sheets.length || 1;
+      const secondsPerFrame = budget ? Number(budget.secondsPerFrame) : 0;
+      const budgetReason = budget && budget.reason ? String(budget.reason) : '';
       const toolbar = h('div', { key: 'bar', className: 'dvv-sb-toolbar' }, [
         data ? h('span', { key: 'cached', className: 'dvv-mini' },
           storyboard.cached === false ? '刚刚生成' : `已缓存${data.generatedAt ? ` · ${fmtRelative(data.generatedAt)}` : ''}`) : null,
         data && data.described ? h('span', { key: 'described', className: 'dvv-mini', 'data-ok': 'true' }, '含描述') : null,
-        data && data.frames ? h('span', { key: 'count', className: 'dvv-sb-meta' }, `${data.frames} 格 · ${data.cols || '?'}×${data.rows || '?'}`) : null,
+        data && data.frames ? h('span', {
+          key: 'count', className: 'dvv-sb-meta',
+          title: budgetReason || undefined,
+        }, `${data.frames} 帧 · ${sheetCount} 张${secondsPerFrame > 0 ? ` · 每 ${secondsPerFrame}s 一帧` : ''}`) : null,
         data && data.frames ? h('span', { key: 'sampling', className: 'dvv-sb-meta' },
           data.frameSampling === 'interval' ? '按间隔抽帧' : '按镜头切点抽帧') : null,
         h('span', { key: 'spacer', className: 'dvv-sb-spacer' }),
@@ -1634,7 +1645,7 @@ window.__ModuleLoader__.load({
         ]),
         data ? h('a', {
           key: 'big', className: 'dvv-btn dvv-link-btn',
-          href: storyboardImageSrc(data, doc.docId), target: '_blank', rel: 'noreferrer',
+          href: storyboardImageSrc(data, doc.docId, 0), target: '_blank', rel: 'noreferrer',
         }, '打开大图') : null,
         h('button', {
           key: 'generate', type: 'button', className: 'dvv-btn', disabled: loading,
@@ -1658,40 +1669,52 @@ window.__ModuleLoader__.load({
         body = h('div', { key: 'empty', className: 'dvv-empty-note' },
           '这个视频还没有分镜。点「生成分镜」，把整段视频的画面拼成一张图。');
       } else {
-        const cells = Array.isArray(data.cells) ? data.cells : [];
-        const cols = Math.max(1, Number(data.cols) || 1);
-        const rows = Math.max(1, Number(data.rows) || 1);
-        const imageSrc = storyboardImageSrc(data, doc.docId);
-        body = h('div', { key: 'sheet', className: 'dvv-sb-wrap' }, [
-          broken
-            ? h('div', { key: 'broken', className: 'dvv-sb-broken' }, [
-              h('div', { key: 'title', className: 'dvv-sb-broken-title' }, '分镜图加载失败'),
-              h('button', { key: 'retry', type: 'button', className: 'dvv-btn', onClick: () => onGenerate() }, '重新生成'),
-            ])
-            : h('div', { key: 'sb', className: 'dvv-sb' }, [
-              h('img', {
-                key: 'img', className: 'dvv-sb-img', src: imageSrc,
-                alt: `${doc.title || '视频'} 的分镜图`, loading: 'lazy',
-                onError: () => setBroken(true),
-              }),
-              ...cells.map((cell) => {
-                const col = Math.max(0, Number(cell.col) || 0);
-                const row = Math.max(0, Number(cell.row) || 0);
-                const label = formatClock(cell.seconds);
-                return h('button', {
-                  key: `cell-${cell.index}-${row}-${col}`, type: 'button', className: 'dvv-sb-cell',
-                  style: {
-                    left: `${(col / cols) * 100}%`,
-                    top: `${(row / rows) * 100}%`,
-                    width: `${100 / cols}%`,
-                    height: `${100 / rows}%`,
-                  },
-                  title: cell.description || `跳到 ${label}`,
-                  'data-seconds': String(cell.seconds),
-                  onClick: () => onSeek(cell.seconds),
-                }, h('span', { key: 'clock', className: 'dvv-sb-clock' }, label));
-              }),
-            ]),
+        const allCells = Array.isArray(data.cells) ? data.cells : [];
+        const sheetNodes = sheets.map((sheet, index) => {
+          const sheetIndex = Number.isFinite(Number(sheet.index)) ? Math.max(0, Math.floor(Number(sheet.index))) : index;
+          const own = Array.isArray(sheet.cells) && sheet.cells.length
+            ? sheet.cells
+            : allCells.filter((cell) => Math.max(0, Math.floor(Number(cell.sheet) || 0)) === sheetIndex);
+          const cols = Math.max(1, Number(sheet.cols) || Number(data.cols) || 1);
+          const rows = Math.max(1, Number(sheet.rows) || Number(data.rows) || 1);
+          const broken = Boolean(brokenSheets[sheetIndex]);
+          return h('div', { key: `sheet-${sheetIndex}`, className: 'dvv-sb-sheet', 'data-sheet': String(sheetIndex) }, [
+            broken
+              ? h('div', { key: 'broken', className: 'dvv-sb-broken' }, [
+                h('div', { key: 'title', className: 'dvv-sb-broken-title' }, '分镜图加载失败'),
+                h('button', { key: 'retry', type: 'button', className: 'dvv-btn', onClick: () => onGenerate() }, '重新生成'),
+              ])
+              : h('div', { key: 'sb', className: 'dvv-sb' }, [
+                h('img', {
+                  key: 'img', className: 'dvv-sb-img',
+                  src: storyboardImageSrc(data, doc.docId, sheetIndex),
+                  alt: `${doc.title || '视频'} 的分镜图（第 ${index + 1} 张）`, loading: 'lazy',
+                  onError: () => setBrokenSheets((prev) => ({ ...prev, [sheetIndex]: true })),
+                }),
+                ...own.map((cell) => {
+                  const col = Math.max(0, Number(cell.col) || 0);
+                  const row = Math.max(0, Number(cell.row) || 0);
+                  const label = formatClock(cell.seconds);
+                  return h('button', {
+                    key: `cell-${sheetIndex}-${cell.index}-${row}-${col}`, type: 'button', className: 'dvv-sb-cell',
+                    style: {
+                      left: `${(col / cols) * 100}%`,
+                      top: `${(row / rows) * 100}%`,
+                      width: `${100 / cols}%`,
+                      height: `${100 / rows}%`,
+                    },
+                    title: cell.description || `跳到 ${label}`,
+                    'data-seconds': String(cell.seconds),
+                    'data-sheet': String(sheetIndex),
+                    onClick: () => onSeek(cell.seconds),
+                  }, h('span', { key: 'clock', className: 'dvv-sb-clock' }, label));
+                }),
+              ]),
+            h('div', { key: 'cap', className: 'dvv-sb-cap' }, `第 ${index + 1}/${sheetCount} 张 · ${cols}×${rows} 格`),
+          ]);
+        });
+        body = h('div', { key: 'sheets', className: 'dvv-sb-wrap' }, [
+          ...sheetNodes,
           data.described ? h('div', { key: 'note', className: 'dvv-sb-note' },
             '把鼠标放到格子上可以看到画面描述；点击格子会跳到对应画面。') : null,
         ].filter(Boolean));
@@ -1721,7 +1744,7 @@ window.__ModuleLoader__.load({
       ]);
     }
 
-    /* ---------------------------------------------------------- 历史列表 / 抽屉 */    /* ---------------------------------------------------------- 历史列表 / 抽屉 */
+    /* ---------------------------------------------------------- 历史列表 / 抽屉 */
 
     /** 封面缩略图：没有 cover 或加载失败时用纯色占位。 */
     function HistoryCover({ src, alt }) {
@@ -1807,7 +1830,7 @@ window.__ModuleLoader__.load({
           .map((value) => String(value ?? '')).join(' ').toLowerCase();
         return hay.includes(needle);
       });
-      return h('div', { className: 'dvv-overlay', onClick: onClose }, h('div', {
+      return h('div', { className: 'dvv-overlay', 'data-quiet': 'true', onClick: onClose }, h('div', {
         key: 'drawer', className: 'dvv-drawer', onClick: (event) => { if (event && typeof event.stopPropagation === 'function') event.stopPropagation(); },
       }, [
         h('div', { key: 'head', className: 'dvv-drawer-head' }, [
@@ -3612,7 +3635,8 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-textarea{flex:1;min-width:0;font:inherit;font-size:13px;line-height:21px;min-height:42px;max-height:140px;padding:8px 12px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.14));background:var(--dsw-alias-bg-layer-1,transparent);color:inherit;outline:none;resize:vertical}
 .dvv-textarea:focus{border-color:var(--dsw-alias-brand-primary)}
 .dvv-overlay{position:absolute;inset:0;z-index:20;display:flex;justify-content:flex-end;background:var(--dsw-alias-bg-overlay,rgba(0,0,0,.32))}
-.dvv-drawer{display:flex;flex-direction:column;width:min(420px,92%);height:100%;background:var(--dsw-alias-bg-layer-1,Canvas);border-left:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.12))}
+.dvv-overlay[data-quiet="true"]{background:transparent}
+.dvv-drawer{display:flex;flex-direction:column;width:min(420px,92%);height:100%;background:var(--dsw-alias-bg-layer-1,Canvas);border-left:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.12));box-shadow:-10px 0 32px rgba(0,0,0,.18)}
 .dvv-modal{display:flex;flex-direction:column;width:min(600px,94%);max-height:88%;margin:auto;background:var(--dsw-alias-bg-layer-1,Canvas);border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.12));border-radius:14px;box-shadow:0 18px 48px rgba(0,0,0,.24);overflow:hidden}
 .dvv-drawer-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.1));background:var(--dsw-specific-sidebar-fill,transparent)}
 .dvv-drawer-title{flex:1;min-width:0;font-size:14px;line-height:21px;font-weight:600}
@@ -3737,7 +3761,9 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-sb-meta{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
 .dvv-sb-check{display:flex;align-items:center;gap:4px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);cursor:pointer}
 .dvv-sb-progress{display:flex;flex-direction:column;gap:8px;padding:12px 0}
-.dvv-sb-wrap{display:flex;flex-direction:column;gap:8px}
+.dvv-sb-wrap{display:flex;flex-direction:column;gap:14px}
+.dvv-sb-sheet{display:flex;flex-direction:column;gap:4px;min-width:0}
+.dvv-sb-cap{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
 .dvv-sb{position:relative;width:100%;border-radius:12px;overflow:hidden;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
 .dvv-sb-img{display:block;width:100%;height:auto}
 .dvv-sb-cell{position:absolute;appearance:none;margin:0;padding:0;border:0;background:transparent;cursor:pointer;outline:none}
