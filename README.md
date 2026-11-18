@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#已知限制)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.9.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.9.1-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -11,7 +11,7 @@
 
 兜底有三档：**本机 Whisper / SenseVoice 转写**（可选引擎、线程、只转前 N 秒），音频全程不出这台电脑；**纯无声/纯画面视频**（没有配音也没有字幕）还能抽帧做**画面文字识别（OCR）**，甚至直接把画面交给**视觉模型**描述场景、人物和动作（「画面理解」，会用到支持图片输入的模型），把画面内容变成带时间戳的文字稿，摘要仍用你 profile 里的模型。
 
-解析可以丢到**后台队列**：首页历史里每条视频会显示解析进度条，「全部解析」把还没分析完的历史一次性排进队列（默认**不限制并发**，提交几个就跑几个；`jobs.concurrency` 设成正数可限制上限），一条任务从头跑完 总结 → 思维导图 → 分镜 →（可选）画面描述，不用再切页签逐个点「生成」。状态只存在内存里，分析结果照常落盘。
+粘贴链接那一刻就进**后台队列**：首页历史里每条视频会显示解析进度条，「全部解析」把还没分析完的历史一次性排进队列（默认**不限制并发**，提交几个就跑几个；`jobs.concurrency` 设成正数可限制上限）。详情页只等元信息就打开，总结、章节、导图、分镜都等后台任务跑完自动回填，切走或回首页都不影响。，一条任务从头跑完 总结 → 思维导图 → 分镜 →（可选）画面描述，不用再切页签逐个点「生成」。状态只存在内存里，分析结果照常落盘。
 
 追问是 **RAG（检索增强）**：先把问题在转写稿里做 BM25 检索，只把最相关的几段（带时间戳）连同对话一起喂给模型，回答里标 `[mm:ss]`，气泡下面还有「依据」按钮，点一下直接跳回那段视频。
 
