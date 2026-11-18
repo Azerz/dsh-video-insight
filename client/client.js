@@ -777,8 +777,22 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'dvv-home' }, [
         statusError ? h('div', { key: 'host', className: 'dvv-error' }, `插件主机未就绪：${statusError}（面板要等 host 半启动后才能解析）`) : null,
         h('div', { key: 'hero', className: 'dvv-home-hero' }, [
-          h('h1', { key: 't', className: 'dvv-home-title' }, '视频解析'),
-          h('p', { key: 's', className: 'dvv-home-sub' }, '粘贴一条链接，30 秒看清一个视频值不值得看。'),
+          h('div', { key: 'head', className: 'dvv-home-head' }, [
+            h('div', { key: 'text', className: 'dvv-home-headtext' }, [
+              h('h1', { key: 't', className: 'dvv-home-title' }, '视频解析'),
+              h('p', { key: 's', className: 'dvv-home-sub' }, '粘贴一条链接，30 秒看清一个视频值不值得看。'),
+            ]),
+            h('div', { key: 'actions', className: 'dvv-home-actions' }, [
+              h('div', { key: 'chips', className: 'dvv-home-chips' }, [
+                ...HOME_EXAMPLES.map(([label, link]) => h('button', {
+                  key: link, type: 'button', className: 'dvv-home-chip',
+                  title: `解析示例：${link}`, disabled: busy,
+                  onClick: () => { if (onExample) onExample(link); },
+                }, label)),
+                h('span', { key: 'tip', className: 'dvv-home-tip' }, '粘贴后回车解析'),
+              ]),
+            ]),
+          ]),
           h('form', { key: 'form', className: 'dvv-home-form', onSubmit: submit }, [
             h('input', {
               key: 'i', className: 'dvv-home-input', type: 'text', value: url,
@@ -790,14 +804,6 @@ window.__ModuleLoader__.load({
             h('button', {
               key: 'go', type: 'submit', className: 'dvv-btn dvv-home-btn', 'data-primary': 'true', disabled: !canSubmit,
             }, busy ? '解析中…' : '解析'),
-          ]),
-          h('div', { key: 'chips', className: 'dvv-home-chips' }, [
-            ...HOME_EXAMPLES.map(([label, link]) => h('button', {
-              key: link, type: 'button', className: 'dvv-home-chip',
-              title: `解析示例：${link}`, disabled: busy,
-              onClick: () => { if (onExample) onExample(link); },
-            }, label)),
-            h('span', { key: 'tip', className: 'dvv-home-tip' }, '粘贴后回车解析'),
           ]),
           !biliReady ? h('div', { key: 'cookie', className: 'dvv-home-hint' }, [
             h('span', { key: 't' }, 'B 站 AI 字幕需要登录 Cookie：'),
@@ -4279,15 +4285,18 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-spacer{flex:1}
 .dvv-note{font-size:12px;line-height:19px;color:var(--dsw-alias-label-secondary)}
 .dvv-home{flex:none;display:flex;flex-direction:column;gap:14px;width:100%;max-width:820px;margin:0 auto;padding:3.5vh 18px 10px}
-.dvv-home-hero{display:flex;flex-direction:column;align-items:center;text-align:center;gap:9px}
+.dvv-home-hero{display:flex;flex-direction:column;align-items:stretch;text-align:left;gap:10px}
+.dvv-home-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.dvv-home-headtext{display:flex;flex-direction:column;gap:3px;min-width:0}
+.dvv-home-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 .dvv-home-title{margin:0;font-size:21px;line-height:28px;font-weight:700;letter-spacing:-.2px;color:var(--dsw-alias-label-primary,inherit)}
-.dvv-home-sub{margin:0;max-width:560px;font-size:13px;line-height:20px;font-weight:400;color:var(--dsw-alias-label-secondary)}
-.dvv-home-chips{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;max-width:600px;margin-top:1px}
+.dvv-home-sub{margin:0;max-width:640px;font-size:12.5px;line-height:19px;font-weight:400;color:var(--dsw-alias-label-secondary)}
+.dvv-home-chips{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px;margin:0}
 .dvv-home-chip{appearance:none;font:inherit;font-size:12px;line-height:18px;padding:5px 12px;border-radius:999px;cursor:pointer;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.12));transition:border-color .15s ease,background .15s ease}
 .dvv-home-chip:hover{border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.1))}
 .dvv-home-chip:disabled{opacity:.55;cursor:not-allowed}
-.dvv-home-tip{flex:none;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);opacity:.7;margin-left:2px}
-.dvv-home-form{display:flex;gap:8px;width:100%;max-width:560px;margin-top:3px}
+.dvv-home-tip{flex:none;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);opacity:.65;margin-left:4px;white-space:nowrap}
+.dvv-home-form{display:flex;gap:8px;width:100%;max-width:none;margin-top:2px}
 .dvv-home-input{flex:1;min-width:0;font:inherit;font-size:14px;line-height:26px;padding:9px 18px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.14));background:var(--dsw-alias-bg-layer-1,transparent);color:inherit;outline:none;transition:border-color .15s ease,box-shadow .15s ease}
 .dvv-home-input:focus{border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-brand-primary) 16%,transparent)}
 .dvv-home-btn{flex:none;padding:0 22px;border-radius:999px;font-size:13px}

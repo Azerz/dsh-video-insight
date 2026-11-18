@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#已知限制)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.10.1-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.10.2-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -23,7 +23,7 @@
 
 入口在左侧栏的面板列表（`sidebar.panellist`，`order: 30`，排在默认条目之后，可按需调整）。图标是粉色播放键 + 星芒。
 
-首页是 Google 式的**居中大输入框 + 解析按钮**（粘贴链接回车即可，示例 chips 与输入行同一块、不再堆多行小字），下面给三个真实示例（TED 演讲 / 哔哩哔哩科普 / 无字幕动画），点一下就能看完整效果；「最近分析」是**四列卡片流**（一屏两行放得下 8 条）：封面、时长、标题、作者，以及总结/章节/导图状态徽标，卡片右上 `⋯` 可以重新解析、复制链接、收藏或删除（历史区自己内联滚动，不带动整页）。解析出视频后才出现顶部的小号输入条，方便随时换一个链接。
+首页顶部是**标题在左、示例与操作在右**的一行头（不再全部居中），下面接一条通栏输入框 + 解析按钮（粘贴链接回车即可），下面给三个真实示例（TED 演讲 / 哔哩哔哩科普 / 无字幕动画），点一下就能看完整效果；「最近分析」是**四列卡片流**（一屏两行放得下 8 条）：封面、时长、标题、作者，以及总结/章节/导图状态徽标，卡片右上 `⋯` 可以重新解析、复制链接、收藏或删除（历史区自己内联滚动，不带动整页）。解析出视频后才出现顶部的小号输入条，方便随时换一个链接。
 
 面板顶部还有**全局任务条**：只要有视频在后台解析就常驻显示「解析队列 3/8 · 正在写总结 42%」，点「展开」是任务抽屉（运行中可取消、失败可重试、完成可打开，底部一键清除已完成）。详情页工具栏分两层：第一层是返回/封面/标题/重新生成▾/导出▾/历史/设置，第二层元信息（作者、时长、发布、播放数据）可收起。页签标题后面有小状态点：实心=已生成、呼吸=生成中、空心=还没生成。
 
