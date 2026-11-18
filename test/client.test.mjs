@@ -284,6 +284,30 @@ function createSandbox() {
   sandbox.__revoked = revoked;
   sandbox.__clipboardWrites = clipboardWrites;
   sandbox.fetch = (input, init) => fakeFetch(input, init, calls);
+  // 只截获后台任务轮询（2000/10000ms）的定时器，其余保持真实计时（供既有慢速用例）。
+  const jobTimers = [];
+  const realSetTimeout = setTimeout;
+  sandbox.setTimeout = (fn, ms, ...args) => {
+    if (ms === 2000 || ms === 10000) {
+      const entry = { fn, ms, args };
+      jobTimers.push(entry);
+      return entry;
+    }
+    return realSetTimeout(fn, ms, ...args);
+  };
+  sandbox.clearTimeout = (id) => {
+    const index = jobTimers.indexOf(id);
+    if (index >= 0) { jobTimers.splice(index, 1); return; }
+    clearTimeout(id);
+  };
+  sandbox.__jobTimers = jobTimers;
+  sandbox.__jobsTick = async () => {
+    const entry = jobTimers.find((item) => item.ms === 2000 || item.ms === 10000);
+    if (!entry) return false;
+    jobTimers.splice(jobTimers.indexOf(entry), 1);
+    try { entry.fn(); } catch { /* ignore */ }
+    return true;
+  };
   return sandbox;
 }
 
@@ -591,6 +615,10 @@ const OUTLINE_VALUE = {
   ],
 };
 let outlineMode = 'ok';
+/** 后台解析队列的假状态（测试里直接改写再 tick）。 */
+let jobsState = { concurrency: 2, active: 0, running: 0, jobs: [] };
+let jobsCancelCalls = [];
+let jobsAllCalls = [];
 let storyboardMode = 'single';
 
 const OUTLINE_HINT_VALUE = {
@@ -906,6 +934,23 @@ function resetRoutes() {
     'analysis/clear': (call) => ({ ok: true, value: { docId: call.body && call.body.docId } }),
     'analysis/chat/clear': (call) => ({ ok: true, value: { docId: call.body && call.body.docId } }),
     'analysis': () => ({ ok: false, code: 'not-found', error: '没有缓存' }),
+    jobs: () => ({ ok: true, value: jobsState }),
+    'jobs/cancel': (call) => {
+      const docId = String((call.body && call.body.docId) || '');
+      jobsCancelCalls.push(docId);
+      jobsState = {
+        ...jobsState,
+        active: Math.max(0, Number(jobsState.active) - 1),
+        jobs: jobsState.jobs.map((job) => (
+          job.docId === docId ? { ...job, status: 'cancelled', stageLabel: '已取消', updatedAt: Date.now() } : job
+        )),
+      };
+      return { ok: true, value: { cancelled: docId ? 1 : 0, jobs: jobsState.jobs } };
+    },
+    'jobs/all': (call) => {
+      jobsAllCalls.push(call.body || {});
+      return { ok: true, value: { started: 2, skipped: 3, jobs: jobsState.jobs } };
+    },
   };
 }
 
@@ -1770,6 +1815,79 @@ const backBtn2 = buttonByText(tree, '返回');
 check('首页仍有返回按钮', Boolean(backBtn2));
 click(backBtn2);
 check('首页点返回调用 layout.selectPanel(null)', layoutCalls.includes(null));
+
+/* ------------------------------------------------ 后台解析队列（v0.9.0） */
+check('挂载后立即 GET /jobs', callsOf('jobs').length >= 1);
+jobsState = {
+  concurrency: 2, active: 2, running: 1,
+  jobs: [
+    { id: 'job-3', docId: 'bilibili:extra3', title: '额外记录 3', status: 'running', stage: 'summary', stageLabel: '正在写总结…', percent: 42, updatedAt: now },
+    { id: 'job-5', docId: 'bilibili:extra5', title: '额外记录 5', status: 'queued', stage: 'transcript', stageLabel: '', percent: 0, updatedAt: now - 1000 },
+    { id: 'job-7', docId: 'bilibili:extra7', title: '额外记录 7', status: 'failed', stage: 'resolve', stageLabel: '', percent: 12, error: 'B 站接口返回 -352', updatedAt: now - 2000 },
+  ],
+};
+await sandbox.__jobsTick();
+tree = await settle();
+check('首页历史显示后台解析进度条', allByClass(tree, 'dvv-jobbar').length >= 2);
+checkIncludes('首页历史显示阶段文案', nodeText(tree), '正在写总结…');
+checkIncludes('首页历史显示排队中', nodeText(tree), '排队中…');
+checkIncludes('失败任务显示「解析失败」', nodeText(tree), '解析失败');
+const failedJobNode = findOne(tree, (node) => hasClass(node, 'dvv-job-failed'));
+check('失败任务 title 带 error 信息', Boolean(failedJobNode) && String(failedJobNode.props.title || '').includes('-352'));
+check('全部解析按钮显示「解析中 N」', Boolean(buttonByText(tree, '解析中 2')));
+
+const jobCancelButtons = findAll(tree, (node) => node.__host === 'element' && node.tag === 'button' && String(node.props.title || '') === '取消后台解析');
+check('历史行有取消按钮', jobCancelButtons.length >= 2);
+click(jobCancelButtons[0]);
+tree = await settle();
+check('取消后台解析 POST docId', jobsCancelCalls.includes('bilibili:extra3'));
+checkIncludes('取消后台解析 toast', nodeText(tree), '已取消后台解析');
+
+clickText(tree, '解析中');
+tree = await settle();
+checkIncludes('全部解析需要二次确认', nodeText(tree), '确认解析？');
+clickText(tree, '确认解析？');
+tree = await settle();
+check('全部解析 POST /jobs/all', jobsAllCalls.length === 1 && Number(jobsAllCalls[0].limit) === 20 && jobsAllCalls[0].describe === true);
+checkIncludes('全部解析 toast', nodeText(tree), '已开始 2 个，跳过 3 个');
+
+// 详情页：解析 BILI 视频，工具条显示后台 chip
+let jobsInput = byClass(tree, 'dvv-home-input');
+change(jobsInput, BILI_DOC.url);
+tree = await settle();
+jobsInput = byClass(tree, 'dvv-home-input');
+keydown(jobsInput, 'Enter');
+tree = await settle(60);
+check('详情页已解析', Boolean(byClass(tree, 'dvv-body')));
+jobsState = {
+  concurrency: 2, active: 1, running: 1,
+  jobs: [{ id: 'job-bili', docId: BILI_DOC.docId, title: BILI_DOC.title, status: 'running', stage: 'summary', stageLabel: '正在写总结…', percent: 42, updatedAt: now }],
+};
+await sandbox.__jobsTick();
+tree = await settle();
+checkIncludes('详情工具条显示后台解析 chip', nodeText(tree), '后台解析 42% · 正在写总结…');
+const chipCancel = findOne(tree, (node) => hasClass(node, 'dvv-job-chip-x'));
+check('chip 有取消按钮', Boolean(chipCancel));
+if (chipCancel) {
+  chipCancel.props.onClick({ preventDefault() {}, stopPropagation() {} });
+  tree = await settle();
+}
+check('chip 取消 POST docId', jobsCancelCalls.slice(-1)[0] === BILI_DOC.docId);
+
+// 完成迁移：running → done 触发历史/大纲/分镜刷新 + toast
+const historyCallsBeforeJob = callsOf('history').length;
+const outlineCallsBeforeJob = callsOf('outline').length;
+const storyboardCallsBeforeJob = callsOf('storyboard').length;
+jobsState = {
+  concurrency: 2, active: 0, running: 0,
+  jobs: [{ id: 'job-bili', docId: BILI_DOC.docId, title: BILI_DOC.title, status: 'done', stage: 'done', stageLabel: '已完成', percent: 100, updatedAt: now + 1000 }],
+};
+await sandbox.__jobsTick();
+tree = await settle(80);
+checkIncludes('后台解析完成 toast', nodeText(tree), '后台解析完成');
+check('完成后刷新历史', callsOf('history').length > historyCallsBeforeJob);
+check('完成后刷新大纲', callsOf('outline').length > outlineCallsBeforeJob);
+check('完成后刷新分镜', callsOf('storyboard').length > storyboardCallsBeforeJob);
 
 check('渲染期间没有运行时异常', runtimeErrors.length === 0);
 if (runtimeErrors.length) console.log(`运行时异常：\n${runtimeErrors.slice(0, 3).join('\n')}`);
