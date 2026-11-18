@@ -30,6 +30,45 @@ window.__ModuleLoader__.load({
       catch { return '/dsh-video/api/'; }
     })();
 
+    /**
+     * 布局自检（临时诊断）：量面板顶部条与它几层祖先的盒子，用 1x1 图片请求把数据带回 host。
+     * 只用于排查"顶部栏被压窄 / 居中"这类从外部拿不到 DOM 的问题；定位后删除。
+     */
+    function diagBox(el) {
+      if (!el || typeof el.getBoundingClientRect !== 'function') return null;
+      const r = el.getBoundingClientRect();
+      const cs = window.getComputedStyle(el);
+      return {
+        tag: String(el.tagName || '').toLowerCase(),
+        cls: String(el.className || '').slice(0, 90),
+        x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height),
+        display: cs.display, width: cs.width, maxWidth: cs.maxWidth, minWidth: cs.minWidth,
+        margin: cs.margin, padding: cs.padding, alignItems: cs.alignItems, justifyContent: cs.justifyContent,
+        position: cs.position, flex: cs.flex, alignSelf: cs.alignSelf, boxSizing: cs.boxSizing,
+      };
+    }
+    function reportPanelLayout() {
+      if (typeof window === 'undefined' || typeof document === 'undefined') return;
+      const root = document.querySelector('.dvv-root');
+      const toolbar = document.querySelector('.dvv-toolbar');
+      const chain = [];
+      let el = toolbar;
+      for (let i = 0; i < 6 && el; i += 1, el = el.parentElement) chain.push(diagBox(el));
+      const payload = {
+        at: Date.now(),
+        href: String(location.href).slice(0, 200),
+        innerWidth: window.innerWidth, innerHeight: window.innerHeight, dpr: window.devicePixelRatio,
+        root: diagBox(root), toolbar: diagBox(toolbar), chain: chain.filter(Boolean),
+      };
+      let bin = '';
+      for (const byte of new TextEncoder().encode(JSON.stringify(payload))) bin += String.fromCharCode(byte);
+      const encoded = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      if (typeof Image !== 'function') return;
+      const img = new Image();
+      img.referrerPolicy = 'no-referrer';
+      img.src = `${API_BASE}diag?d=${encoded}`;
+    }
+
     const EMPTY_SUMMARY = { text: '', suggestions: [], loading: false, phase: '', error: '', done: false, cached: false, cachedAt: '' };
     const EMPTY_CHAPTERS = { loading: false, error: '', note: '', items: null, source: '', cachedAt: '' };
     const EMPTY_TRANSCRIBE = { loading: false, phase: '', percent: null, error: '' };
@@ -858,7 +897,7 @@ window.__ModuleLoader__.load({
       const exportAction = (kind) => { closeMenu(); if (onExport) onExport(kind); };
       const menuList = (items) => h('div', { className: 'dvv-menu-pop', role: 'menu' }, items.map(([key, label, action]) =>
         h('button', { key, type: 'button', className: 'dvv-menu-item', role: 'menuitem', onClick: action }, label)));
-      return h('header', { className: 'dvv-toolbar' }, [
+      return h('header', { className: 'dvv-toolbar', style: { width: '100%', maxWidth: 'none', alignSelf: 'stretch' } }, [
         h('div', { key: 'row', className: 'dvv-toolbar-row' }, [
           h('div', { key: 'left', className: 'dvv-toolbar-left' }, [
             canGoBack ? h('button', {
@@ -2606,6 +2645,11 @@ window.__ModuleLoader__.load({
     function VideoPanel() {
       const [status, setStatus] = useState(null);
       const [statusError, setStatusError] = useState('');
+      // 布局自检（临时）：页面加载后 1.2s 上报一次面板与祖先容器的尺寸。
+      useEffect(() => {
+        const timer = setTimeout(() => { try { reportPanelLayout(); } catch { /* 自检失败忽略 */ } }, 1200);
+        return () => clearTimeout(timer);
+      }, []);
       const [url, setUrl] = useState('');
       const [doc, setDoc] = useState(null);
       const [resolveBusy, setResolveBusy] = useState(false);
@@ -4137,7 +4181,7 @@ window.__ModuleLoader__.load({
         ]);
       }
 
-      return h('div', { className: 'dvv-root' }, [
+      return h('div', { className: 'dvv-root', style: { width: '100%', maxWidth: 'none', alignSelf: 'stretch' } }, [
         h(VideoToolbar, {
           key: 'toolbar', doc, job: currentJob, historyCount: historyItems.length, canGoBack, onBack: goBack,
           onCancelJob: (job) => { void cancelJob(job); },
@@ -4219,6 +4263,7 @@ window.__ModuleLoader__.load({
     /* ------------------------------------------------------------------ 样式 */
 
     const CSS = `
+.dvv-root,.dvv-root *{box-sizing:border-box}
 .dvv-root{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base,Canvas);color:var(--dsw-alias-label-primary,CanvasText)}
 /* 顶部紧凑工具栏 */
 .dvv-toolbar{flex:none;width:100%;max-width:none;margin:0;display:flex;flex-direction:column;gap:4px;padding:9px 20px 7px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08));background:var(--dsw-alias-bg-base,transparent)}
