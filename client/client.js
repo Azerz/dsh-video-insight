@@ -77,11 +77,6 @@ window.__ModuleLoader__.load({
     };
     const TABS = [['summary', '总结'], ['chapters', '章节'], ['transcript', '原文'], ['storyboard', '分镜'], ['mindmap', '思维导图']];
     /** 首页示例链接：点一下直接解析。 */
-    const HOME_EXAMPLES = [
-      ['TED 演讲 · 24min', 'https://www.youtube.com/watch?v=iG9CE55wbtY'],
-      ['哔哩哔哩科普 · 16min', 'https://www.bilibili.com/video/BV14Asw6jE1J'],
-      ['无字幕动画 · 10min', 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'],
-    ];
     const ASK_EXAMPLES = ['这个视频最核心的论点是什么？', '作者的观点有哪些可疑之处？', '用 5 句话讲给完全不懂的人听'];
 
     function platformMeta(platform) {
@@ -768,7 +763,7 @@ window.__ModuleLoader__.load({
     /* ------------------------------------------------------------------ 空态 */
 
     /** 首页：Google 式居中的大号解析框 + 最近分析列表。 */
-    function HomeHero({ url, busy, statusError, biliReady, onUrl, onSubmit, onExample, onGoSettings }) {
+    function HomeHero({ url, busy, statusError, biliReady, onUrl, onSubmit, onGoSettings }) {
       const canSubmit = !busy && String(url ?? '').trim().length > 0;
       const submit = (event) => {
         if (event && typeof event.preventDefault === 'function') event.preventDefault();
@@ -781,16 +776,6 @@ window.__ModuleLoader__.load({
             h('div', { key: 'text', className: 'dvv-home-headtext' }, [
               h('h1', { key: 't', className: 'dvv-home-title' }, '视频解析'),
               h('p', { key: 's', className: 'dvv-home-sub' }, '粘贴一条链接，30 秒看清一个视频值不值得看。'),
-            ]),
-            h('div', { key: 'actions', className: 'dvv-home-actions' }, [
-              h('div', { key: 'chips', className: 'dvv-home-chips' }, [
-                ...HOME_EXAMPLES.map(([label, link]) => h('button', {
-                  key: link, type: 'button', className: 'dvv-home-chip',
-                  title: `解析示例：${link}`, disabled: busy,
-                  onClick: () => { if (onExample) onExample(link); },
-                }, label)),
-                h('span', { key: 'tip', className: 'dvv-home-tip' }, '粘贴后回车解析'),
-              ]),
             ]),
           ]),
           h('form', { key: 'form', className: 'dvv-home-form', onSubmit: submit }, [
@@ -875,11 +860,12 @@ window.__ModuleLoader__.load({
         h('button', { key, type: 'button', className: 'dvv-menu-item', role: 'menuitem', onClick: action }, label)));
       return h('header', { className: 'dvv-toolbar' }, [
         h('div', { key: 'row', className: 'dvv-toolbar-row' }, [
-          canGoBack ? h('button', {
-            key: 'back', type: 'button', className: 'dvv-btn dvv-back',
-            title: doc ? '返回首页' : '返回对话', 'aria-label': doc ? '返回首页' : '返回上一级',
-            onClick: () => { if (onBack) onBack(); },
-          }, '← 返回') : null,
+          h('div', { key: 'left', className: 'dvv-toolbar-left' }, [
+            canGoBack ? h('button', {
+              key: 'back', type: 'button', className: 'dvv-btn dvv-back',
+              title: doc ? '返回首页' : '返回对话', 'aria-label': doc ? '返回首页' : '返回上一级',
+              onClick: () => { if (onBack) onBack(); },
+            }, '← 返回') : null,
           doc ? h('div', { key: 'cover', className: 'dvv-toolbar-cover' }, h(CoverImage, { src: doc.cover, alt: doc.title })) : null,
           h('div', { key: 'main', className: 'dvv-toolbar-main' }, doc ? [
             h('a', {
@@ -892,7 +878,7 @@ window.__ModuleLoader__.load({
             ].filter(Boolean)),
           ] : [
             h('div', { key: 't', className: 'dvv-toolbar-title-plain' }, '视频解析'),
-            h('div', { key: 's', className: 'dvv-toolbar-sub' }, '粘贴链接，自动抓字幕、做总结与思维导图'),
+          ]),
           ]),
           h('div', { key: 'actions', className: 'dvv-toolbar-actions' }, [
             job && jobActive(job) ? h('div', {
@@ -4103,7 +4089,6 @@ window.__ModuleLoader__.load({
             biliReady: Boolean(status && status.bilibili && status.bilibili.cookie),
             onUrl: setUrl,
             onSubmit: () => { void resolve(url); },
-            onExample: (link) => { setUrl(link); void resolve(link); },
             onGoSettings: openSettings,
           }),
           historyItems.length
@@ -4236,8 +4221,9 @@ window.__ModuleLoader__.load({
     const CSS = `
 .dvv-root{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base,Canvas);color:var(--dsw-alias-label-primary,CanvasText)}
 /* 顶部紧凑工具栏 */
-.dvv-toolbar{flex:none;display:flex;flex-direction:column;gap:4px;padding:8px 18px 6px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08))}
-.dvv-toolbar-row{display:flex;align-items:center;gap:10px;min-width:0}
+.dvv-toolbar{flex:none;width:100%;max-width:none;margin:0;display:flex;flex-direction:column;gap:4px;padding:9px 20px 7px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08));background:var(--dsw-alias-bg-base,transparent)}
+.dvv-toolbar-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.dvv-toolbar-left{display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 auto}
 .dvv-back{flex:none}
 .dvv-toolbar-cover{flex:none;width:56px}
 .dvv-toolbar-cover .dvv-cover{width:56px;aspect-ratio:16/9;border-radius:6px;object-fit:cover}

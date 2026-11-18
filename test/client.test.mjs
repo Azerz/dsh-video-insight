@@ -2007,18 +2007,7 @@ const backHome = async () => { const b = buttonByText(tree, '返回'); if (b) cl
 await backHome();
 checkIncludes('首页新副标题', nodeText(tree), '粘贴一条链接，30 秒看清一个视频值不值得看。');
 check('首页不再有隐藏旧副标题节点', !byClass(tree, 'dvv-home-sub2'));
-check('首页有 3 个示例 chips', allByClass(tree, 'dvv-home-chip').length === 3);
-checkIncludes('示例 chip 含 TED 演讲', nodeText(tree), 'TED 演讲');
-checkIncludes('示例 chip 带时长', nodeText(tree), '24min');
-checkIncludes('首页提示粘贴后回车解析', nodeText(tree), '粘贴后回车解析');
-
-const resolveBeforeChip = callsOf('resolve').length;
-click(allByClass(tree, 'dvv-home-chip')[0]);
-tree = await settle(40);
-const chipCall = callsOf('resolve').slice(-1)[0] || {};
-check('点击示例 chip 直接解析', callsOf('resolve').length === resolveBeforeChip + 1
-  && String(chipCall.params && chipCall.params.url || '').indexOf('iG9CE55wbtY') >= 0);
-await backHome();
+check('首页不再有示例 chips', allByClass(tree, 'dvv-home-chip').length === 0);
 
 // 首页：最近分析卡片流
 const cards = allByClass(tree, 'dvv-vcard');
