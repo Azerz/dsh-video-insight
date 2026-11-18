@@ -933,7 +933,7 @@ window.__ModuleLoader__.load({
 
     /* ------------------------------------------------------------------ 总结 */
 
-    function SummaryTab({ doc, summary, onRun, onStop, onCopy, onCopyMarkdown, onDownloadMarkdown, onGoSettings, onSeek }) {
+    function SummaryTab({ doc, summary, job, onRun, onStop, onCopy, onCopyMarkdown, onDownloadMarkdown, onGoSettings, onSeek }) {
       const available = hasTranscript(doc);
       const official = doc && doc.officialSummary && doc.officialSummary.summary ? String(doc.officialSummary.summary) : '';
       const parts = [];
@@ -957,6 +957,14 @@ window.__ModuleLoader__.load({
         parts.push(h('div', { key: 'cached', className: 'dvv-cache-note dvv-note' }, `已缓存 · ${fmtRelative(summary.cachedAt)}（点「重新生成」可覆盖）`));
       }
       if (summary.error) parts.push(h('div', { key: 'err', className: 'dvv-error' }, summary.error));
+      const bgActive = Boolean(job && jobActive(job));
+      if (bgActive && !summary.loading && !summary.text && !summary.error) {
+        parts.push(h('div', { key: 'bg', className: 'dvv-loading-block dvv-bg-block' }, [
+          h('span', { key: 's', className: 'dvv-spinner' }),
+          h('span', { key: 't' }, `后台解析中 ${jobPercent(job)}% · ${jobStageText(job)}`),
+          h('span', { key: 'n', className: 'dvv-note' }, '总结、章节、思维导图与分镜会在后台生成，完成后自动回填。'),
+        ]));
+      }
       if (summary.loading && !summary.text) {
         parts.push(h('div', { key: 'loading', className: 'dvv-loading-block' }, [h('span', { key: 's', className: 'dvv-spinner' }), summary.phase || '正在生成总结…']));
       }
@@ -987,7 +995,7 @@ window.__ModuleLoader__.load({
         onClick: onDownloadMarkdown,
       }, '下载 .md'));
       parts.push(h('div', { key: 'actions', className: 'dvv-actions' }, actions));
-      if (!summary.loading && !summary.text && !summary.error) {
+      if (!summary.loading && !summary.text && !summary.error && !bgActive) {
         parts.push(h('div', { key: 'idle', className: 'dvv-notice' }, [
           h('div', { key: 'n', className: 'dvv-note' }, '还没有生成总结。'),
           h('div', { key: 'a', className: 'dvv-actions' }, h('button', { type: 'button', className: 'dvv-btn', 'data-primary': 'true', onClick: onRun }, '生成总结')),
@@ -1790,6 +1798,8 @@ window.__ModuleLoader__.load({
     /** 百分比：夹在 0–100，排队中恒为 0。 */
     function jobPercent(job) { if (!job || job.status === 'queued') return 0; const value = Number(job.percent); if (!Number.isFinite(value)) return 0; return Math.min(100, Math.max(0, value)); }
     /** 阶段文案：排队中 / host 的 stageLabel / 兜底。 */ function jobStageText(job) { if (!job) return ''; if (job.status === 'queued') return '排队中…'; return String(job.stageLabel || (job.status === 'done' ? '已完成' : '解析中…')); }
+    /** 某个 docId 是否有在跑的后台任务（避免同时开内联 SSE 双跑）。 */
+    function activeJobForDoc(list, docId) { if (!docId) return null; for (const job of Array.isArray(list) ? list : []) if (job && job.docId === docId && jobActive(job)) return job; return null; }
     /** 汇总成 docId → 最新一条任务 的 Map。 */
     function buildJobsByDoc(list) { const map = new Map(); for (const job of Array.isArray(list) ? list : []) { if (!job || !job.docId) continue; const before = map.get(job.docId); if (!before) { map.set(job.docId, job); continue; } if ((Number(job.updatedAt) || 0) >= (Number(before.updatedAt) || 0)) map.set(job.docId, job); } return map; }
 
@@ -2309,6 +2319,8 @@ window.__ModuleLoader__.load({
       const pendingSeek = useRef(null);
       /** 自动转写判重：docId → running | done | cancelled | failed | manual（同一视频不重复自动触发）。 */
       const autoAsrRef = useRef(new Map());
+      /** 后台自动入队判重：docId → true（同一视频每轮只自动提交一次，回首页重置）。 */
+      const autoQueueRef = useRef(new Set());
       /** 双语翻译请求的独立 AbortController（不打断总结 / 追问）。 */
       const translationAbort = useRef(null);
       /** 后台解析队列：上一轮 jobs（用于判断 running/queued → done/failed）与最近 active 数。 */
@@ -2626,6 +2638,24 @@ window.__ModuleLoader__.load({
         }
       }, []);
 
+      /** 拉取 host 分析缓存（GET /analysis）并回填面板；返回是否回填了内容。 */
+      const loadAnalysisCache = useCallback(async (video) => {
+        const target = video ?? docRef.current;
+        if (!target || !target.docId || !mounted.current) return false;
+        try {
+          const value = await call('analysis', { docId: target.docId });
+          if (!mounted.current) return false;
+          const analysis = value && typeof value === 'object' ? (value.analysis || value) : null;
+          const cache = readCachedAnalysis({ analysis });
+          if (!cache) return false;
+          applyAnalysisCache(cache);
+          setDoc((current) => (current && current.docId === target.docId ? { ...current, analysis } : current));
+          return true;
+        } catch (caught) {
+          return false;
+        }
+      }, [applyAnalysisCache]);
+
       /** 清空 host 上这个视频的分析缓存（总结 / 章节 / 导图 / 对话）。 */
       const clearAnalysisCache = useCallback(async (video) => {
         const target = video ?? docRef.current;
@@ -2672,6 +2702,10 @@ window.__ModuleLoader__.load({
       const runSummary = useCallback(async (video) => {
         const target = video ?? docRef.current;
         if (!target || !mounted.current) return;
+        if (activeJobForDoc(jobsRef.current, target.docId)) {
+          showToast('后台解析中，完成后会自动回填总结');
+          return;
+        }
         interruptActive();
         const controller = new AbortController();
         active.current = { controller, kind: 'summary' };
@@ -3101,13 +3135,14 @@ window.__ModuleLoader__.load({
           if (!current || job.docId !== current.docId) continue;
           if (job.status === 'done') {
             showToast('后台解析完成');
+            void loadAnalysisCache(current);
             void loadOutline(current);
             void loadStoryboard(current, { silent: true });
           } else if (job.status === 'failed') {
             showToast(`后台解析失败：${String(job.error || '未知错误')}`);
           }
         }
-      }, [refreshHistory, showToast, loadOutline, loadStoryboard]);
+      }, [refreshHistory, showToast, loadAnalysisCache, loadOutline, loadStoryboard]);
 
       /** 取消某个 docId 的后台任务（历史行 / 详情工具条共用）。 */
       const cancelJob = useCallback(async (jobOrDoc) => {
@@ -3312,6 +3347,7 @@ window.__ModuleLoader__.load({
         docRef.current = null;
         setUrl(text);
         let followUp = null;
+        let queued = false;
         let cachedSummary = false;
         try {
           const video = await call('resolve', { url: text, force: options && options.force ? 1 : undefined }, { signal: controller.signal });
@@ -3334,7 +3370,32 @@ window.__ModuleLoader__.load({
             cachedSummary = Boolean(cache.summary);
           }
           void refreshHistory(); // host 在 /resolve 成功时已写入历史，客户端只重新拉取
-          followUp = video;
+          // 解析成功即入队后台生成（总结 / 导图 / 分镜 / 画面描述）；已在跑或分析完整时不重复提交。
+          const runningJob = activeJobForDoc(jobsRef.current, video.docId);
+          const complete = Boolean(cache && cache.summary && cache.chapters && cache.mindmap);
+          const shouldQueue = !runningJob && !autoQueueRef.current.has(video.docId) && (!complete || Boolean(options && options.force));
+          if (shouldQueue) {
+            autoQueueRef.current.add(video.docId);
+            try {
+              const enqueued = await post('jobs', { docId: video.docId, describe: true }, { signal: controller.signal });
+              if (!mounted.current) return;
+              const job = enqueued && enqueued.job;
+              if (job) {
+                queued = true;
+                jobsRef.current = [...jobsRef.current.filter((item) => item && item.docId !== job.docId), job];
+                setJobs((current) => ({
+                  ...current,
+                  jobs: jobsRef.current,
+                }));
+                void refreshJobs();
+              }
+            } catch (caught) {
+              if (caught && caught.name === 'AbortError') return;
+              queued = false; // 老 host / 网络错误：回退到内联总结，不能把解析弄坏
+            }
+          }
+          // 后台已接手时不跑内联总结，等 job 完成后再回填；否则保持原来的内联行为。
+          if (!queued) followUp = video;
         } catch (caught) {
           if (caught && caught.name === 'AbortError') return;
           if (mounted.current) setError(friendlyResolveError(caught, text));
@@ -3343,7 +3404,7 @@ window.__ModuleLoader__.load({
           if (resolveTicket.current === ticket && mounted.current) setResolveBusy(false);
         }
         if (followUp && hasTranscript(followUp) && !cachedSummary) void runSummary(followUp);
-      }, [url, interruptActive, resetPanels, refreshHistory, runSummary, applyAnalysisCache]);
+      }, [url, interruptActive, resetPanels, refreshHistory, runSummary, applyAnalysisCache, refreshJobs]);
 
       /* ---- 追问：带最近 6 条 history 流式回答 ---- */
 
@@ -3506,11 +3567,15 @@ window.__ModuleLoader__.load({
         void copy(lines.join('\n'), `已复制 ${items.length} 条字幕`);
       };
 
+      const jobsByDoc = buildJobsByDoc(jobs.jobs);
+      const currentJob = doc ? jobsByDoc.get(doc.docId) : null;
+      const jobsActiveCount = Number(jobs.active) > 0 ? Number(jobs.active) : Array.from(jobsByDoc.values()).filter(jobActive).length;
+
       let tabBody = null;
       if (doc) {
         if (tab === 'summary') {
           tabBody = h(SummaryTab, {
-            doc, summary,
+            doc, summary, job: currentJob,
             onRun: () => { void runSummary(doc); },
             onStop: stopSummary,
             onCopy: () => { void copy(summary.text, '已复制总结'); },
@@ -3575,6 +3640,7 @@ window.__ModuleLoader__.load({
       /** 清空当前视频状态，回到插件首页（大输入框 + 最近分析）。 */
       const resetToHome = useCallback(() => {
         abortActive();
+        autoQueueRef.current.clear();
         docRef.current = null;
         setDoc(null);
         setUrl('');
@@ -3606,10 +3672,6 @@ window.__ModuleLoader__.load({
         if (docRef.current) { resetToHome(); return; }
         try { getLayoutService()?.selectPanel(null); } catch { /* 服务不可用：按钮已隐藏 */ }
       };
-
-      const jobsByDoc = buildJobsByDoc(jobs.jobs);
-      const currentJob = doc ? jobsByDoc.get(doc.docId) : null;
-      const jobsActiveCount = Number(jobs.active) > 0 ? Number(jobs.active) : Array.from(jobsByDoc.values()).filter(jobActive).length;
 
       const banners = [];
       if (error) banners.push(h('div', { key: 'error', className: 'dvv-error' }, error));
@@ -3807,6 +3869,8 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 0 2px}
 .dvv-actions-spacer{flex:1}
 .dvv-btn[disabled]{opacity:.55;cursor:not-allowed}
+.dvv-bg-block{flex-wrap:wrap}
+.dvv-bg-block .dvv-note{width:100%;margin:0}
 .dvv-loading-block{display:flex;align-items:center;gap:8px;padding:14px 0;font-size:12px;line-height:19px;color:var(--dsw-alias-label-secondary)}
 .dvv-spinner{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid var(--dsw-alias-border-l2,rgba(127,127,127,.35));border-top-color:var(--dsw-alias-brand-primary);animation:dvv-spin .8s linear infinite}
 @keyframes dvv-spin{to{transform:rotate(360deg)}}

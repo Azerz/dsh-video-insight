@@ -619,6 +619,12 @@ let outlineMode = 'ok';
 let jobsState = { concurrency: 2, active: 0, running: 0, jobs: [] };
 let jobsCancelCalls = [];
 let jobsAllCalls = [];
+/** task-25：POST /jobs 行为（'ok' 建任务 / 'fail' 模拟老 host 让客户端回退内联）与调用记录。 */
+let jobsCreateMode = 'fail';
+let jobsCreateCalls = [];
+/** GET /analysis 的假数据（task-25 完成后回填）。 */
+let analysisMode = 'notfound';
+let analysisValue = null;
 let storyboardMode = 'single';
 
 const OUTLINE_HINT_VALUE = {
@@ -933,8 +939,33 @@ function resetRoutes() {
     },
     'analysis/clear': (call) => ({ ok: true, value: { docId: call.body && call.body.docId } }),
     'analysis/chat/clear': (call) => ({ ok: true, value: { docId: call.body && call.body.docId } }),
-    'analysis': () => ({ ok: false, code: 'not-found', error: '没有缓存' }),
-    jobs: () => ({ ok: true, value: jobsState }),
+    'analysis': (call) => {
+      if (analysisMode === 'ok') return { ok: true, value: { docId: call.params.docId, doc: null, analysis: analysisValue } };
+      return { ok: false, code: 'not-found', error: '没有缓存' };
+    },
+    jobs: (call) => {
+      if (call.method === 'POST') {
+        const body = call.body || {};
+        jobsCreateCalls.push(body);
+        if (jobsCreateMode === 'fail') return { ok: false, code: 'internal', error: '当前主机不支持后台任务' };
+        const docId = String(body.docId || '');
+        const existing = jobsState.jobs.find((job) => job.docId === docId && ['queued', 'running'].includes(job.status));
+        if (existing) return { ok: true, value: { job: existing, created: false } };
+        const job = {
+          id: `job-${jobsState.jobs.length + 1}`, docId, url: '', title: '',
+          status: 'running', stage: 'summary', stageLabel: '正在写总结…', percent: 42,
+          error: '', warnings: [], updatedAt: now,
+        };
+        jobsState = {
+          concurrency: 0,
+          active: Number(jobsState.active || 0) + 1,
+          running: Number(jobsState.running || 0) + 1,
+          jobs: [job, ...jobsState.jobs],
+        };
+        return { ok: true, value: { job, created: true } };
+      }
+      return { ok: true, value: jobsState };
+    },
     'jobs/cancel': (call) => {
       const docId = String((call.body && call.body.docId) || '');
       jobsCancelCalls.push(docId);
@@ -1888,6 +1919,79 @@ checkIncludes('后台解析完成 toast', nodeText(tree), '后台解析完成');
 check('完成后刷新历史', callsOf('history').length > historyCallsBeforeJob);
 check('完成后刷新大纲', callsOf('outline').length > outlineCallsBeforeJob);
 check('完成后刷新分镜', callsOf('storyboard').length > storyboardCallsBeforeJob);
+
+/* ------------------------------------------------ task-25：解析即入队后台任务 */
+jobsCreateMode = 'ok';
+jobsState = { concurrency: 0, active: 0, running: 0, jobs: [] };
+analysisMode = 'notfound';
+// 首页历史里放一条当前视频，用来断言行内进度条
+historyItems = [{
+  docId: BILI_DOC.docId, url: BILI_DOC.url, platform: 'bilibili', id: 'BV1xx411c7mD',
+  title: BILI_DOC.title, author: '硬核拆解', duration: 754, cover: '',
+  hasTranscript: true, hasSummary: false, hasChapters: false, hasMindmap: false, chatCount: 0,
+  favorite: false, analyzedAt: now, action: 'view',
+}, ...historyItems];
+if (buttonByText(tree, '返回')) { click(buttonByText(tree, '返回')); tree = await settle(); }
+check('入队测试前回到首页', Boolean(byClass(tree, 'dvv-home-input')));
+const analyzeBeforeEnqueue = callsOf('analyze').length;
+change(byClass(tree, 'dvv-home-input'), BILI_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-home-input'), 'Enter');
+tree = await settle(90);
+const enqueueBody = jobsCreateCalls.slice(-1)[0] || {};
+check('解析成功后 POST /jobs 入队', enqueueBody.docId === BILI_DOC.docId && enqueueBody.describe === true);
+check('入队后不再内联跑总结', callsOf('analyze').length === analyzeBeforeEnqueue);
+checkIncludes('总结页签显示后台解析占位', nodeText(tree), '后台解析中 42% · 正在写总结…');
+check('后台占位时不显示「还没有生成总结」', !nodeText(tree).includes('还没有生成总结'));
+checkIncludes('详情工具条显示后台 chip', nodeText(tree), '后台解析 42% · 正在写总结…');
+
+click(buttonByText(tree, '返回'));
+tree = await settle();
+check('首页按钮显示解析中 1', Boolean(buttonByText(tree, '解析中 1')));
+check('首页历史行显示后台解析进度条', allByClass(tree, 'dvv-jobbar').length >= 1);
+checkIncludes('首页历史行显示阶段文案', nodeText(tree), '42% · 正在写总结…');
+
+const enqueueCountBeforeReopen = jobsCreateCalls.length;
+change(byClass(tree, 'dvv-home-input'), BILI_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-home-input'), 'Enter');
+tree = await settle(90);
+check('同一视频已在跑时不重复入队', jobsCreateCalls.length === enqueueCountBeforeReopen);
+checkIncludes('复用已有任务的状态', nodeText(tree), '后台解析中 42% · 正在写总结…');
+
+// job running → done：拉 /analysis 回填 + toast
+analysisMode = 'ok';
+analysisValue = {
+  savedAt: now - 5e3,
+  summary: { text: '## 后台总结\n- 后台第一条结论', generatedAt: now - 5e3 },
+  chapters: { items: [{ start: 0, title: '后台章节', gist: '后台章节说明' }], source: 'llm', generatedAt: now - 5e3 },
+  mindmap: { mindmap: { title: '后台导图', children: [{ title: '后台分支' }] }, generatedAt: now - 5e3 },
+  chat: [],
+};
+jobsState = {
+  concurrency: 0, active: 0, running: 0,
+  jobs: [{ id: 'job-bili', docId: BILI_DOC.docId, title: BILI_DOC.title, status: 'done', stage: 'done', stageLabel: '已完成', percent: 100, updatedAt: now + 1000 }],
+};
+await sandbox.__jobsTick();
+tree = await settle(100);
+check('完成后 GET /analysis 回填', callsOf('analysis').some((call) => call.params.docId === BILI_DOC.docId));
+checkIncludes('后台完成 toast', nodeText(tree), '后台解析完成');
+checkIncludes('总结回填后台生成内容', nodeText(tree), '后台总结');
+check('完成后不再显示后台解析占位', !nodeText(tree).includes('后台解析中'));
+
+// /jobs 失败：回退原来的内联总结
+jobsCreateMode = 'fail';
+analysisMode = 'notfound';
+click(buttonByText(tree, '返回'));
+tree = await settle();
+const analyzeBeforeFallback = callsOf('analyze').length;
+change(byClass(tree, 'dvv-home-input'), YT_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-home-input'), 'Enter');
+tree = await settle(90);
+check('/jobs 失败时回退内联总结', callsOf('analyze').length > analyzeBeforeFallback);
+checkIncludes('回退内联总结有内容', nodeText(tree), '结论');
+check('回退模式不显示后台占位', !nodeText(tree).includes('后台解析中'));
 
 check('渲染期间没有运行时异常', runtimeErrors.length === 0);
 if (runtimeErrors.length) console.log(`运行时异常：\n${runtimeErrors.slice(0, 3).join('\n')}`);
