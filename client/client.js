@@ -3788,7 +3788,9 @@ window.__ModuleLoader__.load({
           // 解析成功即入队后台生成（总结 / 导图 / 分镜 / 画面描述）；已在跑或分析完整时不重复提交。
           const runningJob = activeJobForDoc(jobsRef.current, video.docId);
           const complete = Boolean(cache && cache.summary && cache.chapters && cache.mindmap);
-          const shouldQueue = !runningJob && !autoQueueRef.current.has(video.docId) && (!complete || Boolean(options && options.force));
+          // 从历史记录回看时不排队重跑；force 只用于重新拉元信息，不再触发重新分析。
+          const fromHistory = Boolean(options && options.fromHistory);
+          const shouldQueue = !runningJob && !autoQueueRef.current.has(video.docId) && !fromHistory && !complete;
           if (shouldQueue) {
             autoQueueRef.current.add(video.docId);
             try {
@@ -3966,7 +3968,8 @@ window.__ModuleLoader__.load({
         setOverlay('');
         const target = (item && (item.url || item.docId)) || '';
         if (!target) { setError('这条历史记录没有链接，无法重新解析。'); return; }
-        void resolve(target, { force: true });
+        // 历史记录只是「回看」：拉一次最新元信息即可，不要因此重新排队跑一遍分析。
+        void resolve(target, { force: true, fromHistory: true });
       };
 
       const copyAllSegments = (list) => {
