@@ -619,6 +619,7 @@ let outlineMode = 'ok';
 let jobsState = { concurrency: 2, active: 0, running: 0, jobs: [] };
 let jobsCancelCalls = [];
 let jobsAllCalls = [];
+let jobsClearCalls = [];
 /** task-25：POST /jobs 行为（'ok' 建任务 / 'fail' 模拟老 host 让客户端回退内联）与调用记录。 */
 let jobsCreateMode = 'fail';
 let jobsCreateCalls = [];
@@ -981,6 +982,11 @@ function resetRoutes() {
     'jobs/all': (call) => {
       jobsAllCalls.push(call.body || {});
       return { ok: true, value: { started: 2, skipped: 3, jobs: jobsState.jobs } };
+    },
+    'jobs/clear': (call) => {
+      jobsClearCalls.push(call.body || {});
+      jobsState = { ...jobsState, jobs: jobsState.jobs.filter((job) => ['queued', 'running'].includes(job.status)) };
+      return { ok: true, value: { cleared: 1, jobs: jobsState.jobs } };
     },
   };
 }
@@ -1835,7 +1841,7 @@ check('返回按钮回到插件首页', Boolean(byClass(tree, 'dvv-home')));
 
 // 首页最多展示 10 条 + 「打开历史查看全部」
 tree = await settle();
-check('首页最近分析只显示前 10 条', allByClass(tree, 'dvv-hist').length === 10);
+check('首页最近分析只显示前 10 张卡片', allByClass(tree, 'dvv-vcard').length === 10);
 checkIncludes('首页显示打开历史查看全部', nodeText(tree), '打开历史查看全部');
 clickText(tree, '打开历史查看全部');
 tree = await settle();
@@ -1992,6 +1998,176 @@ tree = await settle(90);
 check('/jobs 失败时回退内联总结', callsOf('analyze').length > analyzeBeforeFallback);
 checkIncludes('回退内联总结有内容', nodeText(tree), '结论');
 check('回退模式不显示后台占位', !nodeText(tree).includes('后台解析中'));
+
+
+/* ---------------------------------------------- task-26：P0 UI/UX 改造（v0.10.0） */
+
+// 首页：新副标题 + 旧文案兼容 + 示例 chips
+const backHome = async () => { const b = buttonByText(tree, '返回'); if (b) click(b); tree = await settle(); };
+await backHome();
+checkIncludes('首页新副标题', nodeText(tree), '粘贴一条链接，30 秒看清一个视频值不值得看。');
+check('首页保留旧副标题节点', Boolean(byClass(tree, 'dvv-home-sub2')));
+checkIncludes('首页旧副标题仍可读', nodeText(tree), '粘贴 YouTube / 哔哩哔哩链接，自动抓字幕、生成总结、章节和思维导图');
+check('首页有 3 个示例 chips', allByClass(tree, 'dvv-home-chip').length === 3);
+checkIncludes('示例 chip 含 TED 演讲', nodeText(tree), 'TED 演讲');
+checkIncludes('示例 chip 带时长', nodeText(tree), '24min');
+checkIncludes('首页提示粘贴后回车解析', nodeText(tree), '粘贴后回车解析');
+
+const resolveBeforeChip = callsOf('resolve').length;
+click(allByClass(tree, 'dvv-home-chip')[0]);
+tree = await settle(40);
+const chipCall = callsOf('resolve').slice(-1)[0] || {};
+check('点击示例 chip 直接解析', callsOf('resolve').length === resolveBeforeChip + 1
+  && String(chipCall.params && chipCall.params.url || '').indexOf('iG9CE55wbtY') >= 0);
+await backHome();
+
+// 首页：最近分析卡片流
+const cards = allByClass(tree, 'dvv-vcard');
+check('首页最近分析是卡片网格', Boolean(byClass(tree, 'dvv-cards-grid')) && cards.length > 0);
+check('首页卡片最多 10 张', cards.length === 10);
+check('卡片带封面时长角标', allByClass(tree, 'dvv-vcard-dur').length >= 1);
+checkIncludes('卡片带标题', nodeText(cards[0]), '第一性原理');
+checkIncludes('卡片带状态徽标', nodeText(cards[0]), '字幕');
+check('卡片 ⋯ 菜单出现', (() => { const b = byClass(cards[0], 'dvv-vcard-more'); return Boolean(b) && (click(b), true); })());
+tree = await settle();
+check('卡片菜单含重新解析/复制链接/收藏/删除', Boolean(buttonByText(tree, '重新解析'))
+  && Boolean(buttonByText(tree, '复制链接')) && Boolean(buttonByText(tree, '删除')));
+const clipBeforeCard = sandbox.__clipboardWrites.length;
+clickText(tree, '复制链接');
+tree = await settle();
+check('卡片菜单复制链接写入剪贴板', sandbox.__clipboardWrites.length === clipBeforeCard + 1
+  && String(sandbox.__clipboardWrites.slice(-1)[0] || '').indexOf('BV1xx411c7mD') >= 0);
+
+const cards2 = allByClass(tree, 'dvv-vcard');
+const favBeforeCard = callsOf('history/favorite').length;
+click(byClass(cards2[0], 'dvv-vcard-more'));
+tree = await settle();
+clickText(tree, '收藏');
+tree = await settle();
+check('卡片菜单收藏 POST /history/favorite', callsOf('history/favorite').length === favBeforeCard + 1);
+checkIncludes('卡片菜单收藏 toast', nodeText(tree), '已收藏');
+
+const resolveBeforeCard = callsOf('resolve').length;
+click(allByClass(tree, 'dvv-vcard')[0]);
+tree = await settle(40);
+check('点击卡片重新解析', callsOf('resolve').length === resolveBeforeCard + 1
+  && String(callsOf('resolve').slice(-1)[0].params.url || '').indexOf('BV1xx411c7mD') >= 0);
+await backHome();
+
+// 全局任务条 + 任务抽屉
+jobsState = {
+  concurrency: 2, active: 3, running: 1,
+  jobs: [
+    { id: 'job-r1', docId: 'bilibili:extra0', title: '额外记录 0', status: 'running', stage: 'summary', stageLabel: '正在写总结…', percent: 42, updatedAt: now },
+    { id: 'job-q1', docId: 'bilibili:extra1', title: '额外记录 1', status: 'queued', stage: 'transcript', stageLabel: '', percent: 0, updatedAt: now },
+    { id: 'job-f1', docId: 'bilibili:extra2', title: '额外记录 2', status: 'failed', stage: 'resolve', stageLabel: '', percent: 12, error: 'boom', updatedAt: now },
+  ],
+};
+await sandbox.__jobsTick();
+tree = await settle();
+const gbar = byClass(tree, 'dvv-jobbar-global');
+check('全局任务条出现', Boolean(gbar));
+checkIncludes('全局任务条显示队列', nodeText(gbar), '解析队列');
+checkIncludes('全局任务条显示阶段', nodeText(gbar), '正在写总结');
+clickText(tree, '展开');
+tree = await settle();
+check('任务抽屉打开', Boolean(byClass(tree, 'dvv-job-drawer')));
+checkIncludes('任务抽屉分区运行中', nodeText(byClass(tree, 'dvv-job-drawer')), '运行中 · 1');
+checkIncludes('任务抽屉分区排队中', nodeText(byClass(tree, 'dvv-job-drawer')), '排队中 · 1');
+checkIncludes('任务抽屉分区最近完成', nodeText(byClass(tree, 'dvv-job-drawer')), '最近完成 · 1');
+jobsCreateMode = 'ok';
+const retryBefore = jobsCreateCalls.length;
+clickText(tree, '重试');
+tree = await settle(40);
+check('任务抽屉重试 POST /jobs', jobsCreateCalls.length === retryBefore + 1
+  && String(jobsCreateCalls.slice(-1)[0].docId || '') === 'bilibili:extra2');
+const cancelBefore = jobsCancelCalls.length;
+clickText(tree, '取消');
+tree = await settle(40);
+check('任务抽屉取消 POST /jobs/cancel', jobsCancelCalls.length === cancelBefore + 1);
+const clearBefore = jobsClearCalls.length;
+clickText(tree, '清除已完成');
+tree = await settle(40);
+check('清空已完成 POST /jobs/clear', jobsClearCalls.length === clearBefore + 1);
+clickText(tree, '关闭');
+tree = await settle();
+check('关闭任务抽屉', !byClass(tree, 'dvv-job-drawer'));
+
+// 工具栏两层 + 信息层折叠 + 下拉菜单
+jobsCreateMode = 'fail';
+change(byClass(tree, 'dvv-home-input'), BILI_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-home-input'), 'Enter');
+tree = await settle(80);
+check('工具栏分两层', Boolean(byClass(tree, 'dvv-toolbar-row')) && Boolean(byClass(tree, 'dvv-meta')));
+checkIncludes('信息层含播放数', nodeText(byClass(tree, 'dvv-meta')), '播放');
+clickText(tree, '收起视频信息');
+tree = await settle();
+check('收起信息层后折叠', byClass(tree, 'dvv-meta').props['data-collapsed'] === 'true'
+  && sandbox.__store.get('dsh-video.meta.collapsed') === '1');
+checkIncludes('折叠后出现展开入口', nodeText(tree), '展开视频信息');
+clickText(tree, '展开视频信息');
+tree = await settle();
+check('展开信息层恢复', byClass(tree, 'dvv-meta').props['data-collapsed'] === 'false'
+  && sandbox.__store.get('dsh-video.meta.collapsed') === '0');
+
+// 页签状态点
+const dots = allByClass(tree, 'dvv-tab-dot');
+check('页签状态点 5 个', dots.length === 5);
+check('页签状态点带状态值', dots.every((dot) => ['ready', 'loading', 'empty'].includes(String(dot.props['data-state']))));
+
+// 总结卡片化 + 折叠区
+check('总结渲染主卡', Boolean(byClass(tree, 'dvv-sum-big')));
+checkIncludes('总结主卡标题', nodeText(byClass(tree, 'dvv-sum-big')), '结论');
+checkIncludes('总结主卡保留列表', nodeText(byClass(tree, 'dvv-sum-big')), '要点一');
+checkIncludes('总结主卡保留时间徽标', allByClass(byClass(tree, 'dvv-sum-big'), 'dvv-ts').map(nodeText).join('|'), '00:08');
+check('总结无额外分段时不渲染折叠区', allByClass(tree, 'dvv-sum-fold').length === 0);
+
+// 工具栏下拉：重新生成 / 导出
+const mmBefore = callsOf('mindmap').length;
+clickText(tree, '重新生成 ▾');
+tree = await settle();
+check('重新生成菜单包含总结/导图/分镜', Boolean(buttonByText(tree, '重新生成总结'))
+  && Boolean(buttonByText(tree, '重新生成思维导图')) && Boolean(buttonByText(tree, '重新生成分镜')));
+click(buttonByText(tree, '重新生成思维导图'));
+tree = await settle(40);
+check('菜单重新生成思维导图 GET /mindmap', callsOf('mindmap').length > mmBefore);
+const clipBeforeExport = sandbox.__clipboardWrites.length;
+clickText(tree, '导出 ▾');
+tree = await settle();
+check('导出菜单包含三项', Boolean(buttonByText(tree, '复制 Markdown'))
+  && Boolean(buttonByText(tree, '下载 .md')) && Boolean(buttonByText(tree, '复制全文')));
+click(buttonByText(tree, '复制全文'));
+tree = await settle();
+check('导出菜单复制全文写入剪贴板', sandbox.__clipboardWrites.length === clipBeforeExport + 1
+  && String(sandbox.__clipboardWrites.slice(-1)[0] || '').indexOf('大家好') >= 0);
+
+// parseSummarySections 纯函数
+const pss = exports_.__test.parseSummarySections;
+check('暴露 parseSummarySections', typeof pss === 'function');
+const parsed = typeof pss === 'function' ? pss(SUMMARY_TEXT) : [];
+check('parseSummarySections 按 ## 切段', parsed.length === 1 && parsed[0].title === '结论');
+check('parseSummarySections 保留正文', String(parsed[0] && parsed[0].body || '').indexOf('要点一') >= 0 && String(parsed[0].body).indexOf('### 深入') >= 0);
+check('parseSummarySections 无标题时回退整段', (() => {
+  const plain = typeof pss === 'function' ? pss('没有标题的一段话') : [];
+  return plain.length === 1 && String(plain[0].body).indexOf('没有标题') >= 0;
+})());
+
+// 统一状态组件：章节错误态（UnifiedState/ErrorState）
+outlineMode = 'notfound';
+clickText(tree, '返回');
+tree = await settle();
+change(byClass(tree, 'dvv-home-input'), YT_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-home-input'), 'Enter');
+tree = await settle(60);
+clickText(tree, '章节');
+tree = await settle(40);
+check('章节错误用统一状态组件', Boolean(byClass(tree, 'dvv-state')));
+checkIncludes('章节错误显示中文原因', nodeText(tree), '还没有这个视频的大纲');
+check('章节错误有重试按钮', Boolean(buttonByText(tree, '重试')));
+outlineMode = 'ok';
+
 
 check('渲染期间没有运行时异常', runtimeErrors.length === 0);
 if (runtimeErrors.length) console.log(`运行时异常：\n${runtimeErrors.slice(0, 3).join('\n')}`);
