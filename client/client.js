@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const PLAYER_KEY = 'dsh-video.player.collapsed';
     const META_KEY = 'dsh-video.meta.collapsed';
     const HISTORY_LIMIT = 100;
-    const HOME_RECENT_LIMIT = 10;
+    const HOME_RECENT_LIMIT = 8;
     const SEGMENT_LIMIT = 400;
     /** 后台解析队列轮询间隔：有任务在跑时 2s，空闲时 10s。 */
     const JOBS_ACTIVE_MS = 2000;
@@ -791,14 +791,14 @@ window.__ModuleLoader__.load({
               key: 'go', type: 'submit', className: 'dvv-btn dvv-home-btn', 'data-primary': 'true', disabled: !canSubmit,
             }, busy ? '解析中…' : '解析'),
           ]),
-          h('div', { key: 'chips', className: 'dvv-home-chips' }, HOME_EXAMPLES.map(([label, link]) =>
-            h('button', {
+          h('div', { key: 'chips', className: 'dvv-home-chips' }, [
+            ...HOME_EXAMPLES.map(([label, link]) => h('button', {
               key: link, type: 'button', className: 'dvv-home-chip',
               title: `解析示例：${link}`, disabled: busy,
               onClick: () => { if (onExample) onExample(link); },
-            }, label))),
-          h('div', { key: 'tip', className: 'dvv-home-tip' }, '粘贴后回车解析'),
-          h('p', { key: 'sub2', className: 'dvv-home-sub2' }, '粘贴 YouTube / 哔哩哔哩链接，自动抓字幕、生成总结、章节和思维导图，还能对着视频追问'),
+            }, label)),
+            h('span', { key: 'tip', className: 'dvv-home-tip' }, '粘贴后回车解析'),
+          ]),
           !biliReady ? h('div', { key: 'cookie', className: 'dvv-home-hint' }, [
             h('span', { key: 't' }, 'B 站 AI 字幕需要登录 Cookie：'),
             h('button', { key: 'b', type: 'button', className: 'dvv-btn dvv-btn-mini', onClick: onGoSettings }, '去设置'),
@@ -4278,25 +4278,25 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-warn{display:flex;gap:8px;align-items:flex-start;font-size:12px;line-height:19px;color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.1));border-left:3px solid var(--dsw-alias-state-warn-primary);border-radius:8px;padding:8px 12px;margin:8px 0}
 .dvv-spacer{flex:1}
 .dvv-note{font-size:12px;line-height:19px;color:var(--dsw-alias-label-secondary)}
-.dvv-home{flex:none;display:flex;flex-direction:column;gap:16px;width:100%;max-width:760px;margin:0 auto;padding:5vh 18px 10px}
-.dvv-home-hero{display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px}
-.dvv-home-title{margin:0;font-size:26px;line-height:34px;font-weight:700;letter-spacing:-.4px;color:var(--dsw-alias-label-primary,inherit)}
-.dvv-home-sub{margin:0;max-width:560px;font-size:15px;line-height:24px;font-weight:550;color:var(--dsw-alias-label-primary)}
-.dvv-home-sub2{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
-.dvv-home-chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:2px}
+.dvv-home{flex:none;display:flex;flex-direction:column;gap:14px;width:100%;max-width:820px;margin:0 auto;padding:3.5vh 18px 10px}
+.dvv-home-hero{display:flex;flex-direction:column;align-items:center;text-align:center;gap:9px}
+.dvv-home-title{margin:0;font-size:21px;line-height:28px;font-weight:700;letter-spacing:-.2px;color:var(--dsw-alias-label-primary,inherit)}
+.dvv-home-sub{margin:0;max-width:560px;font-size:13px;line-height:20px;font-weight:400;color:var(--dsw-alias-label-secondary)}
+.dvv-home-chips{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;max-width:600px;margin-top:1px}
 .dvv-home-chip{appearance:none;font:inherit;font-size:12px;line-height:18px;padding:5px 12px;border-radius:999px;cursor:pointer;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.12));transition:border-color .15s ease,background .15s ease}
 .dvv-home-chip:hover{border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.1))}
 .dvv-home-chip:disabled{opacity:.55;cursor:not-allowed}
-.dvv-home-tip{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);opacity:.8}
-.dvv-home-form{display:flex;gap:10px;width:100%;max-width:640px;margin-top:6px}
+.dvv-home-tip{flex:none;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);opacity:.7;margin-left:2px}
+.dvv-home-form{display:flex;gap:8px;width:100%;max-width:560px;margin-top:3px}
 .dvv-home-input{flex:1;min-width:0;font:inherit;font-size:14px;line-height:26px;padding:9px 18px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.14));background:var(--dsw-alias-bg-layer-1,transparent);color:inherit;outline:none;transition:border-color .15s ease,box-shadow .15s ease}
 .dvv-home-input:focus{border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-brand-primary) 16%,transparent)}
 .dvv-home-btn{flex:none;padding:0 22px;border-radius:999px;font-size:13px}
 .dvv-home-hint{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px;font-size:12px;line-height:19px;color:var(--dsw-alias-label-secondary)}
 .dvv-btn-mini{padding:0 10px;line-height:22px;font-size:12px;border-radius:999px}
-.dvv-home-recent{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;width:100%;max-width:900px;margin:10px auto 0;padding:0 2px 18px}
+.dvv-home-recent{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;width:100%;max-width:960px;margin:8px auto 0;padding:0 2px 12px}
 .dvv-recent-cards .dvv-recent-head{justify-content:flex-start}
-.dvv-cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.dvv-cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(196px,1fr));gap:12px}
+@media (min-width:820px){.dvv-cards-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .dvv-vcard{position:relative;display:flex;flex-direction:column;min-width:0;border-radius:12px;border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.1));background:var(--dsw-alias-bg-layer-1,transparent);cursor:pointer;overflow:hidden;transition:border-color .15s ease,transform .12s ease}
 .dvv-vcard:hover{border-color:var(--dsw-alias-brand-primary);transform:translateY(-1px)}
 .dvv-vcard-cover{position:relative;aspect-ratio:16/9;background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.12));overflow:hidden}

@@ -1072,7 +1072,7 @@ const report = (phase) => {
 
 let tree = await settle();
 checkIncludes('首页标题「视频解析」', nodeText(tree), '视频解析');
-checkIncludes('首页副标题', nodeText(tree), '粘贴 YouTube / 哔哩哔哩链接，自动抓字幕、生成总结、章节和思维导图');
+checkIncludes('首页副标题', nodeText(tree), '粘贴一条链接，30 秒看清一个视频值不值得看。');
 check('首页有解析输入框', Boolean(byClass(tree, 'dvv-home-input')));
 checkIncludes('输入框带示例占位', String((byClass(tree, 'dvv-home-input') || {}).props?.placeholder || ''), 'youtube.com');
 check('首页有「解析」按钮', Boolean(buttonByText(tree, '解析')));
@@ -1841,7 +1841,7 @@ check('返回按钮回到插件首页', Boolean(byClass(tree, 'dvv-home')));
 
 // 首页最多展示 10 条 + 「打开历史查看全部」
 tree = await settle();
-check('首页最近分析只显示前 10 张卡片', allByClass(tree, 'dvv-vcard').length === 10);
+check('首页最近分析只显示前 8 张卡片', allByClass(tree, 'dvv-vcard').length === 8);
 checkIncludes('首页显示打开历史查看全部', nodeText(tree), '打开历史查看全部');
 clickText(tree, '打开历史查看全部');
 tree = await settle();
@@ -2006,8 +2006,7 @@ check('回退模式不显示后台占位', !nodeText(tree).includes('后台解�
 const backHome = async () => { const b = buttonByText(tree, '返回'); if (b) click(b); tree = await settle(); };
 await backHome();
 checkIncludes('首页新副标题', nodeText(tree), '粘贴一条链接，30 秒看清一个视频值不值得看。');
-check('首页保留旧副标题节点', Boolean(byClass(tree, 'dvv-home-sub2')));
-checkIncludes('首页旧副标题仍可读', nodeText(tree), '粘贴 YouTube / 哔哩哔哩链接，自动抓字幕、生成总结、章节和思维导图');
+check('首页不再有隐藏旧副标题节点', !byClass(tree, 'dvv-home-sub2'));
 check('首页有 3 个示例 chips', allByClass(tree, 'dvv-home-chip').length === 3);
 checkIncludes('示例 chip 含 TED 演讲', nodeText(tree), 'TED 演讲');
 checkIncludes('示例 chip 带时长', nodeText(tree), '24min');
@@ -2024,7 +2023,7 @@ await backHome();
 // 首页：最近分析卡片流
 const cards = allByClass(tree, 'dvv-vcard');
 check('首页最近分析是卡片网格', Boolean(byClass(tree, 'dvv-cards-grid')) && cards.length > 0);
-check('首页卡片最多 10 张', cards.length === 10);
+check('首页卡片最多 8 张', cards.length === 8);
 check('卡片带封面时长角标', allByClass(tree, 'dvv-vcard-dur').length >= 1);
 checkIncludes('卡片带标题', nodeText(cards[0]), '第一性原理');
 checkIncludes('卡片带状态徽标', nodeText(cards[0]), '字幕');

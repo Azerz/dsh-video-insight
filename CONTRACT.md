@@ -13,7 +13,7 @@ const API_BASE = new URL('dsh-video/api/', document.baseURI).toString();
 
 ```json
 { "ok": true, "value": {
-  "version": "0.10.0",
+  "version": "0.10.1",
   "model": { "provider": "opencode-go", "model": "deepseek-v4.1-flash" },
   "bilibili": { "cookie": false },
   "platforms": { "youtube": true, "bilibili": true },
