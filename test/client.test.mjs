@@ -857,6 +857,18 @@ function translateEvents(lang) {
 
 let translateCache = null;
 
+const INSTALL_PLAN = {
+  platform: 'darwin',
+  plan: [
+    { id: 'ffmpeg', label: 'ffmpeg', method: 'download', bytes: 19000000, platform: 'darwin-arm64', hint: '', installed: true, detectedPath: '/opt/homebrew/bin/ffmpeg' },
+    { id: 'ytdlp', label: 'yt-dlp', method: 'download', bytes: 37000000, platform: 'darwin-arm64', hint: '', installed: false, detectedPath: '' },
+    { id: 'whisper', label: 'whisper-cli', method: 'brew', bytes: 0, platform: 'darwin-arm64', hint: 'macOS/Linux 上推荐 brew install whisper.cpp', installed: false, detectedPath: '' },
+    { id: 'sherpa', label: 'sherpa-onnx', method: 'download', bytes: 246000000, platform: 'darwin-arm64', hint: '', installed: true, detectedPath: '/Users/test/.dsh/video-tools/sherpa-onnx/bin/sherpa-onnx-offline' },
+  ],
+};
+let installPlanValue = null;
+let installMode = 'ok';
+
 let bookmarkItems = [
   { id: 'bm-1', start: 8, end: 12, text: '第一性原理是拆到最本质的问题', createdAt: now - 60e3 },
   { id: 'bm-2', start: 62, end: 70, text: '注意力经济让内容变得碎片化', label: '重点', createdAt: now - 30e3 },
@@ -920,6 +932,22 @@ function resetRoutes() {
       return { ok: true, value: ASR };
     },
     'asr/config/_:unused': () => ({ ok: true, value: ASR }),
+    'install/plan': () => ({ ok: true, value: installPlanValue || INSTALL_PLAN }),
+    install: (call) => {
+      if (installMode === 'slow') {
+        return { __sseSlow: [{ type: 'phase', text: '正在下载 yt-dlp…' }, { type: 'progress', stage: 'download', component: 'ytdlp', percent: null, received: 1024, total: 0 }] };
+      }
+      if (installMode === 'error') {
+        return { __sse: [{ type: 'phase', text: '正在下载 yt-dlp…' }, { type: 'error', code: 'install-download-failed', message: '镜像不可用' }] };
+      }
+      return { __sse: [
+        { type: 'phase', text: '正在下载 yt-dlp…' },
+        { type: 'progress', stage: 'download', component: 'ytdlp', percent: 42, received: 1024, total: 4096 },
+        { type: 'installed', component: 'yt-dlp', path: '/Users/test/.dsh/video-tools/bin/yt-dlp' },
+        { type: 'progress', stage: 'extract', component: 'ytdlp', percent: 100, received: 4096, total: 4096 },
+        { type: 'done', installed: ['yt-dlp'], status: 'ok' },
+      ] };
+    },
     credentials: () => ({ ok: true, value: { bilibili: { cookie: true } } }),
     resolve: (call) => {
       const target = String(call.params.url || '');
@@ -2397,6 +2425,14 @@ tree = await settle(30);
 clickText(tree, '返回');
 tree = await settle(40);
 check('task28 首页环境准备卡显示', Boolean(byClass(tree, 'dvv-setup-card')) && nodeText(tree).includes('环境准备'));
+const setupInstallBtn = buttonByText(tree, '一键安装缺失组件');
+check('task30 首页环境准备卡有「一键安装缺失组件」', Boolean(setupInstallBtn));
+if (setupInstallBtn) {
+  click(setupInstallBtn);
+  tree = await settle(20);
+  check('task30 首页一键安装提交 all', (lastCallOf('install')?.body || {}).id === 'all');
+  installMode = 'ok';
+}
 const setupClose = byClass(tree, 'dvv-setup-close');
 if (setupClose) click(setupClose);
 tree = await settle();
@@ -2478,6 +2514,72 @@ asrStatusOverride = null;
 if (!clickText(tree, '关闭')) clickText(tree, 'Close');
 tree = await settle(30);
 
+
+/* ---------------------------------------------------------------- task-30：本机组件一键安装 */
+asrStatusOverride = JSON.parse(JSON.stringify(ASR));
+asrStatusOverride.ready = false;
+asrStatusOverride.tools.ytdlp.available = false;
+asrStatusOverride.tools.ytdlp.path = '';
+asrStatusOverride.tools.whisper.available = false;
+asrStatusOverride.tools.whisper.path = '';
+installPlanValue = JSON.parse(JSON.stringify(INSTALL_PLAN));
+installMode = 'ok';
+
+clickText(tree, '设置');
+tree = await settle(40);
+await recheckAsr();
+check('task30 打开设置拉取安装计划', callsOf('install/plan').length >= 1);
+check('task30 本机组件区显示全部自动安装', Boolean(buttonByText(tree, '全部自动安装')));
+const autoInstallBtns = findAll(tree, (node) => node.__host === 'element' && node.tag === 'button' && nodeText(node) === '自动安装');
+check('task30 未装组件显示自动安装', autoInstallBtns.length >= 1);
+check('task30 brew 组件显示用 Homebrew 安装', Boolean(buttonByText(tree, '用 Homebrew 安装')));
+checkIncludes('task30 brew 组件提示需要 Homebrew', asrBoxText(), '需要本机已安装 Homebrew');
+
+const planCallsBefore = callsOf('install/plan').length;
+const asrCallsBefore = callsOf('asr/status').length;
+click(autoInstallBtns[0]);
+tree = await settle(20);
+check('task30 点击自动安装提交 ytdlp', (lastCallOf('install')?.body || {}).id === 'ytdlp');
+await settle(20);
+checkIncludes('task30 安装完成 toast', nodeText(tree), '已安装 yt-dlp');
+check('task30 安装后刷新安装计划', callsOf('install/plan').length > planCallsBefore);
+check('task30 安装后刷新 ASR 状态', callsOf('asr/status').length > asrCallsBefore);
+
+clickText(tree, '全部自动安装');
+tree = await settle(20);
+check('task30 全部自动安装提交 all', (lastCallOf('install')?.body || {}).id === 'all');
+checkIncludes('task30 全部安装完成 toast', nodeText(tree), '已安装');
+
+installMode = 'slow';
+clickText(tree, '全部自动安装');
+tree = await settle(20);
+check('task30 安装中显示取消按钮', Boolean(buttonByText(tree, '取消')));
+const installProgressNodes = allByClass(tree, 'dvv-progress');
+check('task30 未知进度显示不确定态', installProgressNodes.length >= 1
+  && installProgressNodes[installProgressNodes.length - 1].props['data-indeterminate'] === 'true');
+const cancelInstallBtn = buttonByText(tree, '取消');
+if (cancelInstallBtn) click(cancelInstallBtn);
+tree = await settle(30);
+checkIncludes('task30 取消安装 toast', nodeText(tree), '已取消安装');
+check('task30 取消后安装按钮恢复可用',
+  !buttonByText(tree, '全部自动安装') || buttonByText(tree, '全部自动安装').props.disabled !== true);
+
+installMode = 'error';
+const autoInstallBtns2 = findAll(tree, (node) => node.__host === 'element' && node.tag === 'button' && nodeText(node) === '自动安装');
+if (autoInstallBtns2.length) click(autoInstallBtns2[0]);
+tree = await settle(30);
+checkIncludes('task30 安装失败中文提示', nodeText(tree), '下载失败');
+installMode = 'ok';
+
+clickText(tree, 'English');
+tree = await settle(40);
+check('task30 英文安装区无中文残留', cjkChars(asrBoxText()).length === 0);
+if (!clickText(tree, '中文')) clickText(tree, 'Chinese');
+tree = await settle(40);
+asrStatusOverride = null;
+installPlanValue = null;
+if (!clickText(tree, '关闭')) clickText(tree, 'Close');
+tree = await settle(30);
 
 check('渲染期间没有运行时异常', runtimeErrors.length === 0);
 if (runtimeErrors.length) console.log(`运行时异常：\n${runtimeErrors.slice(0, 3).join('\n')}`);

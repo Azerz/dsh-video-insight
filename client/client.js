@@ -289,7 +289,7 @@ window.__ModuleLoader__.load({
       'toast.noSegments': ['没有可复制的字幕', 'No captions to copy'],
       'setup.title': ['环境准备', 'Setup required'],
       'setup.body': ['本地转写组件还没就绪：缺 ffmpeg / yt-dlp / 模型时，没字幕的视频会退回只按标题和简介分析。', 'Local transcription is not ready yet: without ffmpeg / yt-dlp / models, videos without captions fall back to title and description only.'],
-      'setup.go': ['去设置里下载模型或填写路径 →', 'Open settings to download models or set paths →'],
+      'setup.go': ['去设置里手动安装/填写路径 →', 'Open settings to install manually or set paths →'],
       'setup.dismiss': ['关闭提示', 'Dismiss'],
       'asr.comp.title': ['本机组件', 'Local tools'],
       'asr.comp.refresh': ['重新检测', 'Re-check'],
@@ -298,6 +298,24 @@ window.__ModuleLoader__.load({
       'asr.comp.save': ['保存路径', 'Save path'],
       'asr.comp.saved': ['路径已保存（留空 = 使用默认路径）', 'Path saved (empty = default)'],
       'asr.comp.placeholder': ['留空 = 使用默认路径', 'Empty = default path'],
+      'asr.comp.all': ['全部自动安装', 'Install all'],
+      'asr.comp.install': ['自动安装', 'Install'],
+      'asr.comp.brewInstall': ['用 Homebrew 安装', 'Install via Homebrew'],
+      'asr.comp.brewHint': ['需要本机已安装 Homebrew；也可以直接在上面填路径', 'Needs Homebrew on this machine; you can also type a path above'],
+      'asr.comp.installing': ['安装中…', 'Installing…'],
+      'asr.comp.extracting': ['正在解压…', 'Extracting…'],
+      'asr.comp.installPlanError': ['读取安装信息失败：{message}', 'Failed to read install plan: {message}'],
+      'asr.installFailed': ['安装失败：{message}', 'Install failed: {message}'],
+      'asr.installedPath': ['已安装到 {path}', 'Installed at {path}'],
+      'setup.installAll': ['一键安装缺失组件', 'Install missing components'],
+      'toast.installDone': ['已安装 {name}', 'Installed {name}'],
+      'toast.installAllDone': ['已安装 {count} 个组件', 'Installed {count} components'],
+      'toast.installCancelled': ['已取消安装', 'Install cancelled'],
+      'error.install-needs-brew': ['需要先在本机安装 Homebrew 才能用 brew 安装这个组件', 'Homebrew is required on this machine to install this component'],
+      'error.install-download-failed': ['下载失败：网络或镜像不可用，稍后重试或手动安装', 'Download failed: network or mirror unavailable; retry later or install manually'],
+      'error.install-extract-failed': ['解压或校验失败：下载文件可能不完整，稍后重试', 'Extract/verify failed: the download may be incomplete; retry later'],
+      'error.install-unavailable': ['当前平台没有可自动安装的包，请手动安装', 'No prebuilt installer for this platform; install manually'],
+      'error.bad-component': ['未知组件', 'Unknown component'],
       'asr.comp.ffmpeg': ['ffmpeg', 'ffmpeg'],
       'asr.comp.ytdlp': ['yt-dlp', 'yt-dlp'],
       'asr.comp.whisper': ['whisper-cli', 'whisper-cli'],
@@ -476,6 +494,7 @@ window.__ModuleLoader__.load({
     const VISION_MODEL_PLACEHOLDER = 'opencode-go/deepseek-v4.1-flash';
     /** 分镜：host 生成的分镜拼图（GET 读缓存 / POST SSE 生成），格子带秒数可 seek。 */
     const EMPTY_STORYBOARD = { data: null, loading: false, phase: '', percent: null, error: '', code: '' };
+    const EMPTY_INSTALL = { id: '', loading: false, phase: '', percent: null, received: 0, total: 0 };
     /** 大纲：host 按「思维导图一级节点 → 章节 → 均匀切分」给出，章节与关键画面共用同一份数据与画面描述缓存。 */
     const EMPTY_OUTLINE = { docId: '', loading: false, loaded: false, error: '', code: '', data: null, genLoading: false, genPhase: '', genPercent: null, genError: '' };
     const OUTLINE_SOURCE_LABEL = { mindmap: '按思维导图切分', chapters: '按视频章节切分', uniform: '按时长均匀切分' };
@@ -948,6 +967,13 @@ window.__ModuleLoader__.load({
       while (value >= 1024 && index < units.length - 1) { value /= 1024; index += 1; }
       const text = value >= 10 || index === 0 ? String(Math.round(value)) : String(Math.round(value * 10) / 10);
       return `${text} ${units[index]}`;
+    }
+
+    function friendlyInstallError(error) {
+      const localized = codeText(error);
+      if (localized) return localized;
+      const message = String((error && error.message) || '').trim();
+      return t('asr.installFailed', { message: message || t('common.unknown') });
     }
 
     function friendlyModelError(error) {
@@ -2966,12 +2992,26 @@ window.__ModuleLoader__.load({
     }
 
     /** 首页「环境准备」提示卡：本地转写没就绪时引导去设置，可手动关闭。 */
-    function SetupCard({ onOpen, onDismiss }) {
+    function SetupCard({ onOpen, onDismiss, onInstallAll, onCancelInstall, installing }) {
+      const busy = Boolean(installing && installing.loading);
+      const percent = busy && Number.isFinite(installing.percent) ? installing.percent : null;
+      const phase = busy ? String(installing.phase || t('asr.comp.installing')) : '';
       return h('div', { className: 'dvv-setup-card' }, [
         h('div', { key: 'main', className: 'dvv-setup-main' }, [
           h('div', { key: 't', className: 'dvv-label' }, t('setup.title')),
           h('div', { key: 'b', className: 'dvv-note' }, t('setup.body')),
-          h('button', { key: 'go', type: 'button', className: 'dvv-btn dvv-btn-sm dvv-btn-primary', onClick: onOpen }, t('setup.go')),
+          busy
+            ? h('div', { key: 'prog', className: 'dvv-setup-progress' }, [
+                h(AsrProgress, { key: 'bar', percent }),
+                h('div', { key: 'row', className: 'dvv-install-line' }, [
+                  h('span', { key: 'p', className: 'dvv-note' }, percent === null ? phase : `${phase} · ${Math.round(percent)}%`),
+                  h('button', { key: 'c', type: 'button', className: 'dvv-btn dvv-btn-sm', onClick: onCancelInstall }, t('common.cancel')),
+                ]),
+              ])
+            : h('div', { key: 'go', className: 'dvv-setup-actions' }, [
+                h('button', { key: 'a', type: 'button', className: 'dvv-btn dvv-btn-sm dvv-btn-primary', onClick: onInstallAll }, t('setup.installAll')),
+                h('button', { key: 'g', type: 'button', className: 'dvv-btn dvv-btn-sm', onClick: onOpen }, t('setup.go')),
+              ]),
         ]),
         h('button', {
           key: 'x', type: 'button', className: 'dvv-btn dvv-btn-sm dvv-setup-close',
@@ -2980,7 +3020,7 @@ window.__ModuleLoader__.load({
       ]);
     }
 
-    function AsrSection({ asr, saving, note, error, onConfig, onRefresh, models, modelsError, downloading, onDownloadModel, onCancelDownload, onCopied }) {
+    function AsrSection({ asr, saving, note, error, onConfig, onRefresh, models, modelsError, downloading, onDownloadModel, onCancelDownload, onCopied, plan, planError, installing, onInstallAll, onInstall, onCancelInstall }) {
       if (!asr) {
         return h('div', { className: 'dvv-asr-box' }, [
           h('div', { key: 't', className: 'dvv-label' }, t('asr.title')),
@@ -3137,21 +3177,57 @@ window.__ModuleLoader__.load({
         h('input', { key: 'c', type: 'checkbox', checked: Boolean(config.keepAudio), onChange: () => onConfig({ keepAudio: !config.keepAudio }) }),
         h('span', { key: 't' }, t('asr.keepAudio')),
       ]));
+      const installList = plan && Array.isArray(plan.plan) ? plan.plan : [];
+      const planEntry = (key) => installList.find((item) => item && item.id === key) || null;
+      const busyId = installing && installing.loading ? String(installing.id || '') : '';
+      const installProgress = (key) => {
+        const percent = Number.isFinite(installing.percent) ? installing.percent : null;
+        const phase = String(installing.phase || t('asr.comp.installing'));
+        return h('div', { key: `inst-${key}`, className: 'dvv-install-line' }, [
+          h(AsrProgress, { key: 'bar', percent }),
+          h('span', { key: 'p', className: 'dvv-note' }, percent === null ? phase : `${phase} · ${Math.round(percent)}%`),
+          h('button', { key: 'c', type: 'button', className: 'dvv-btn dvv-btn-sm', onClick: onCancelInstall }, t('common.cancel')),
+        ]);
+      };
       rows.push(h('div', { key: 'tools-head', className: 'dvv-asr-head' }, [
         h('span', { key: 't', className: 'dvv-label' }, t('asr.comp.title')),
+        h('span', { key: 'sp', className: 'dvv-asr-spacer' }),
+        h('button', {
+          key: 'all', type: 'button', className: 'dvv-btn dvv-btn-sm',
+          disabled: Boolean(busyId),
+          onClick: () => { if (onInstallAll) onInstallAll(); },
+        }, t('asr.comp.all')),
         h('button', { key: 'r', type: 'button', className: 'dvv-btn dvv-btn-sm', onClick: () => { if (onRefresh) onRefresh(); } }, t('asr.comp.refresh')),
       ]));
+      if (busyId === 'all') rows.push(installProgress('all'));
+      if (planError) rows.push(h('div', { key: 'plan-error', className: 'dvv-note' }, String(planError)));
       ASR_BINARIES.forEach(([key, labelKey, configKey]) => {
         const tool = tools[key] || {};
         const available = Boolean(tool.available);
-        rows.push(h('div', { key: `tool-${key}`, className: 'dvv-path-line' }, [
+        const entry = planEntry(key);
+        const busy = busyId === key;
+        const cells = [
           h('span', { key: 'd', className: 'dvv-cap-dot', 'data-ok': available ? 'true' : 'false' }),
           h('span', { key: 'l', className: 'dvv-label dvv-path-label' }, `${t(labelKey)} · ${available ? t('asr.comp.available') : t('asr.comp.missing')}`),
           h(AsrPathRow, {
             key: 'p', value: String(config[configKey] || ''), placeholder: String(tool.path || t('asr.comp.placeholder')),
             saving: Boolean(saving), onSave: (text) => onConfig({ [configKey]: text }),
           }),
-        ]));
+        ];
+        if (!available && entry && !busy) {
+          const isBrew = entry.method === 'brew';
+          cells.push(h('button', {
+            key: 'inst', type: 'button', className: 'dvv-btn dvv-btn-sm',
+            disabled: Boolean(busyId) || Boolean(saving),
+            title: isBrew ? t('asr.comp.brewHint') : '',
+            onClick: () => { if (onInstall) onInstall(key); },
+          }, isBrew ? t('asr.comp.brewInstall') : t('asr.comp.install')));
+        }
+        rows.push(h('div', { key: `tool-${key}`, className: 'dvv-path-line' }, cells));
+        if (!available && entry && entry.method === 'brew' && !busy) {
+          rows.push(h('div', { key: `brew-${key}`, className: 'dvv-note' }, t('asr.comp.brewHint')));
+        }
+        if (busy) rows.push(installProgress(key));
       });
       rows.push(h(AsrModelsBlock, {
         key: 'model-cards', models: models || null, error: modelsError || '',
@@ -3175,7 +3251,7 @@ window.__ModuleLoader__.load({
 
     /* -------------------------------------------------------------- 设置弹层 */
 
-    function SettingsModal({ status, cookie, saving, note, onCookie, onSave, onClear, onClose, onRefresh, asr, asrSaving, asrNote, asrError, onAsrConfig, doc, onClearAnalysis, onClearChat, lang, onLang, asrModels, asrModelsError, modelDownloading, onDownloadModel, onCancelDownload, onRefreshAsr }) {
+    function SettingsModal({ status, cookie, saving, note, onCookie, onSave, onClear, onClose, onRefresh, asr, asrSaving, asrNote, asrError, onAsrConfig, doc, onClearAnalysis, onClearChat, lang, onLang, asrModels, asrModelsError, modelDownloading, onDownloadModel, onCancelDownload, onRefreshAsr, asrPlan, installPlanError, installJob, onInstallComponent, onCancelInstall }) {
       // 「清空本视频分析缓存」的二次确认只影响当前打开的视频。
       const [confirmCache, setConfirmCache] = useState(false);
       const model = status && status.model ? `${status.model.provider ?? '?'} · ${status.model.model ?? '?'}` : '未获取到（插件主机可能还没就绪）';
@@ -3259,6 +3335,10 @@ window.__ModuleLoader__.load({
             models: asrModels && asrModels.models ? asrModels.models : null, modelsError: asrModelsError, downloading: modelDownloading,
             onDownloadModel, onCancelDownload,
             onCopied: () => {},
+            plan: asrPlan, planError: installPlanError, installing: installJob,
+            onInstallAll: () => { if (onInstallComponent) onInstallComponent('all'); },
+            onInstall: (id) => { if (onInstallComponent) onInstallComponent(id); },
+            onCancelInstall: () => { if (onCancelInstall) onCancelInstall(); },
           }),
         ]),
       ]));
@@ -3306,6 +3386,9 @@ window.__ModuleLoader__.load({
       const [asrModelsError, setAsrModelsError] = useState('');
       const [modelDl, setModelDl] = useState({ id: '', loading: false, phase: '', percent: null });
       const [setupDismissed, setSetupDismissed] = useState(() => readSetupDismissed());
+      const [asrPlan, setAsrPlan] = useState(null);
+      const [asrPlanError, setAsrPlanError] = useState('');
+      const [installJob, setInstallJob] = useState(EMPTY_INSTALL);
       const [transcribe, setTranscribe] = useState(EMPTY_TRANSCRIBE);
       const [mindmap, setMindmap] = useState(EMPTY_MINDMAP);
       const [titlesLoading, setTitlesLoading] = useState(false);
@@ -3461,6 +3544,8 @@ window.__ModuleLoader__.load({
       }, []);
 
       const modelAbort = useRef(null);
+      const installAbort = useRef(null);
+      const installJobRef = useRef(EMPTY_INSTALL);
 
       /** 一键下载模型（POST /asr/models SSE，进度/取消）。 */
       const downloadAsrModels = useCallback((id, force) => {
@@ -3519,6 +3604,98 @@ window.__ModuleLoader__.load({
       const cancelModelDownload = useCallback(() => {
         if (modelAbort.current) { try { modelAbort.current.abort(); } catch { /* ignore */ } }
       }, []);
+
+      /* ---- 本机组件一键安装：GET /install/plan、POST /install（SSE） ---- */
+
+      const loadInstallPlan = useCallback(async () => {
+        try {
+          const value = await call('install/plan');
+          if (!mounted.current) return;
+          setAsrPlan(value || null);
+          setAsrPlanError('');
+        } catch (caught) {
+          if (!mounted.current || (caught && caught.name === 'AbortError')) return;
+          const message = String((caught && caught.message) || t('common.unknown'));
+          setAsrPlanError(t('asr.comp.installPlanError', { message }));
+        }
+      }, []);
+
+      const cancelInstall = useCallback(() => {
+        if (installAbort.current) { try { installAbort.current.abort(); } catch { /* ignore */ } }
+      }, []);
+
+      const installComponents = useCallback((id) => {
+        const target = String(id || '');
+        if (!target || installJobRef.current.loading) return;
+        if (installAbort.current) { try { installAbort.current.abort(); } catch { /* ignore */ } }
+        const controller = new AbortController();
+        installAbort.current = controller;
+        const start = { id: target, loading: true, phase: t('asr.comp.installing'), percent: null, received: 0, total: 0 };
+        installJobRef.current = start;
+        setInstallJob(start);
+        void (async () => {
+          let finished = false;
+          let failure = null;
+          const names = [];
+          try {
+            await streamSSE('install', { id: target }, {
+              signal: controller.signal,
+              onEvent(event) {
+                if (!mounted.current) return 'stop';
+                const current = installJobRef.current;
+                if (!current.loading) return 'stop';
+                if (event.type === 'phase') {
+                  const next = { ...current, phase: String(event.text || current.phase) };
+                  installJobRef.current = next;
+                  setInstallJob(next);
+                } else if (event.type === 'progress') {
+                  const raw = event.percent;
+                  const percent = raw === null || raw === undefined || raw === '' ? null : Math.max(0, Math.min(100, Number(raw)));
+                  const phase = event.stage === 'extract' ? t('asr.comp.extracting') : current.phase;
+                  const next = {
+                    ...current,
+                    percent: Number.isFinite(percent) ? percent : null,
+                    phase,
+                    received: Number(event.received) || current.received,
+                    total: Number(event.total) || current.total,
+                  };
+                  installJobRef.current = next;
+                  setInstallJob(next);
+                } else if (event.type === 'installed') {
+                  if (event.component && !names.includes(String(event.component))) names.push(String(event.component));
+                } else if (event.type === 'done') {
+                  finished = true;
+                  return 'stop';
+                } else if (event.type === 'error') {
+                  failure = { code: event.code, message: event.message };
+                  return 'stop';
+                }
+                return undefined;
+              },
+            });
+            if (failure) throw failure;
+          } catch (caught) {
+            if (caught && caught.name === 'AbortError') {
+              if (mounted.current) showToast(t('toast.installCancelled'));
+            } else if (mounted.current) {
+              showToast(friendlyInstallError(caught));
+            }
+          } finally {
+            if (installAbort.current === controller) installAbort.current = null;
+            installJobRef.current = EMPTY_INSTALL;
+            if (mounted.current) {
+              setInstallJob(EMPTY_INSTALL);
+              if (finished) {
+                if (target === 'all') showToast(t('toast.installAllDone', { count: names.length }));
+                else showToast(t('toast.installDone', { name: names[0] || target }));
+                void refreshAsr(true);
+                void loadAsrModels();
+                void loadInstallPlan();
+              }
+            }
+          }
+        })();
+      }, [loadAsrModels, loadInstallPlan, refreshAsr, showToast]);
 
       /* ---- 历史：host 持久化（GET /history、POST /history/clear|remove） ---- */
 
@@ -4622,7 +4799,7 @@ window.__ModuleLoader__.load({
         try { if (active.current && active.current.controller) active.current.controller.abort(); } catch { /* ignore */ }
       }, []);
 
-      useEffect(() => { void refreshStatus(); void refreshHistory(); void refreshAsr(); }, [refreshStatus, refreshHistory, refreshAsr]);
+      useEffect(() => { void refreshStatus(); void refreshHistory(); void refreshAsr(); void loadInstallPlan(); }, [refreshStatus, refreshHistory, refreshAsr, loadInstallPlan]);
 
       // 后台解析队列轮询：挂载立即拉一次；有任务 2s、空闲 10s；页面隐藏时暂停（保持 10s 心跳）。
       useEffect(() => {
@@ -4679,7 +4856,7 @@ window.__ModuleLoader__.load({
 
       /* ---------------------------------------------------------------- 渲染 */
 
-      const openSettings = () => { setOverlay('settings'); setCookieNote(''); setAsrNote(''); void refreshAsr(); void loadAsrModels(); };
+      const openSettings = () => { setOverlay('settings'); setCookieNote(''); setAsrNote(''); void refreshAsr(); void loadAsrModels(); void loadInstallPlan(); };
 
       /** 历史项点击：host 记录里 url 是原链接，优先用 url 重新解析。 */
       const openHistoryItem = (item) => {
@@ -4860,6 +5037,9 @@ window.__ModuleLoader__.load({
             ? h(SetupCard, {
                 key: 'setup', onOpen: openSettings,
                 onDismiss: () => { writeSetupDismissed(); setSetupDismissed(true); },
+                onInstallAll: () => installComponents('all'),
+                onCancelInstall: cancelInstall,
+                installing: installJob,
               })
             : null,
           historyItems.length
@@ -4981,7 +5161,10 @@ window.__ModuleLoader__.load({
           asrModels, asrModelsError, modelDownloading: modelDl,
           onDownloadModel: (id, force) => downloadAsrModels(id, force),
           onCancelDownload: cancelModelDownload,
-          onRefreshAsr: () => { void refreshAsr(true); void loadAsrModels(); },
+          onRefreshAsr: () => { void refreshAsr(true); void loadAsrModels(); void loadInstallPlan(); },
+          asrPlan, installPlanError: asrPlanError, installJob,
+          onInstallComponent: (id) => installComponents(id),
+          onCancelInstall: cancelInstall,
           onAsrConfig: (patch) => { void submitAsrConfig(patch); },
           doc, lang: langSetting, onLang: changeLang,
           onClearAnalysis: (video) => { void clearAnalysisCache(video); },
@@ -5385,6 +5568,11 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-cmd{flex:1;min-width:0;overflow:auto;padding:6px 8px;border-radius:8px;background:var(--dsw-alias-bg-layer-2);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:nowrap}
 .dvv-setup-card{display:flex;gap:8px;align-items:flex-start;margin:0 0 14px;padding:12px 14px;border:1px solid var(--dsw-alias-border-l1);border-left:3px solid var(--dsw-alias-brand-primary);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
 .dvv-setup-main{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0}
+.dvv-setup-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.dvv-setup-progress{display:flex;flex-direction:column;gap:6px;margin-top:4px}
+.dvv-install-line{display:flex;align-items:center;gap:8px;margin:2px 0 6px}
+.dvv-install-line .dvv-progress{flex:1}
+.dvv-asr-spacer{flex:1}
 .dvv-setup-close{flex:none;padding:2px 8px;font-size:14px;line-height:1.2}
 @media (max-width:979px){
   /* 单列：播放器 → 页签（含字幕提示条） → 追问对话框，整页滚动。
