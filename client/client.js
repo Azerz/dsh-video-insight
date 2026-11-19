@@ -287,6 +287,56 @@ window.__ModuleLoader__.load({
       'toast.noHistory': ['还没有历史记录可以解析', 'No history to analyze yet'],
       'toast.translateCancelled': ['已取消翻译', 'Translation cancelled'],
       'toast.noSegments': ['没有可复制的字幕', 'No captions to copy'],
+      'setup.title': ['环境准备', 'Setup required'],
+      'setup.body': ['本地转写组件还没就绪：缺 ffmpeg / yt-dlp / 模型时，没字幕的视频会退回只按标题和简介分析。', 'Local transcription is not ready yet: without ffmpeg / yt-dlp / models, videos without captions fall back to title and description only.'],
+      'setup.go': ['去设置里下载模型或填写路径 →', 'Open settings to download models or set paths →'],
+      'setup.dismiss': ['关闭提示', 'Dismiss'],
+      'asr.comp.title': ['本机组件', 'Local tools'],
+      'asr.comp.refresh': ['重新检测', 'Re-check'],
+      'asr.comp.available': ['可用', 'Ready'],
+      'asr.comp.missing': ['未找到', 'Not found'],
+      'asr.comp.save': ['保存路径', 'Save path'],
+      'asr.comp.saved': ['路径已保存（留空 = 使用默认路径）', 'Path saved (empty = default)'],
+      'asr.comp.placeholder': ['留空 = 使用默认路径', 'Empty = default path'],
+      'asr.comp.ffmpeg': ['ffmpeg', 'ffmpeg'],
+      'asr.comp.ytdlp': ['yt-dlp', 'yt-dlp'],
+      'asr.comp.whisper': ['whisper-cli', 'whisper-cli'],
+      'asr.comp.sherpa': ['sherpa-onnx', 'sherpa-onnx'],
+      'asr.models.title': ['模型文件', 'Model files'],
+      'asr.models.loading': ['正在读取模型信息…', 'Loading model info…'],
+      'asr.models.ready': ['已就绪', 'Ready'],
+      'asr.models.missing': ['未下载', 'Missing'],
+      'asr.models.download': ['下载', 'Download'],
+      'asr.models.redownload': ['重新下载', 'Re-download'],
+      'asr.models.cancel': ['取消下载', 'Cancel download'],
+      'asr.models.downloading': ['正在下载…', 'Downloading…'],
+      'asr.models.path': ['模型路径', 'Model path'],
+      'asr.models.tokens': ['词表路径', 'Tokens path'],
+      'asr.install.title': ['安装提示', 'Installation'],
+      'asr.install.copy': ['复制', 'Copy'],
+      'asr.install.copied': ['已复制', 'Copied'],
+      'asr.install.macHint': ['macOS 可用 Homebrew 安装：', 'On macOS, install with Homebrew:'],
+      'asr.install.winHint': ['Windows 可用 winget 安装：', 'On Windows, install with winget:'],
+      'asr.install.whisperWin': ['whisper.cpp：从 Releases 下载 whisper-bin-x64.zip，解压后把 whisper-cli.exe 路径填到上面的「whisper-cli」。', 'whisper.cpp: download whisper-bin-x64.zip from Releases, unzip, then paste the whisper-cli.exe path above.'],
+      'asr.install.sherpaWin': ['sherpa-onnx：从 Releases 下载 Windows 包，解压到 ~/.dsh/video-tools/sherpa-onnx。', 'sherpa-onnx: download the Windows package from Releases and unzip it to ~/.dsh/video-tools/sherpa-onnx.'],
+      'asr.install.sherpaMac': ['sherpa-onnx：从 GitHub Releases 下载 macOS 包，解压到 ~/.dsh/video-tools/sherpa-onnx。', 'sherpa-onnx: download the macOS build from GitHub Releases and unzip it to ~/.dsh/video-tools/sherpa-onnx.'],
+      'common.subtitle': ['字幕：', 'Captions: '],
+      'common.unknown': ['未知错误', 'Unknown error'],
+      'summary.copyMdTitle': ['复制整篇总结（Markdown）', 'Copy the whole summary (Markdown)'],
+      'summary.downloadTitle': ['下载 Markdown 文件', 'Download the Markdown file'],
+      'transcribe.note': ['识别完全在本机运行，音频不会上传；摘要仍使用当前配置的模型。', 'Recognition runs entirely on this machine; audio is not uploaded. Summaries still use the configured model.'],
+      'transcribe.phase': ['正在准备语音转写…', 'Preparing transcription…'],
+      'transcribe.offNote': ['当前视频没有字幕，且自动转写已关闭。可以在「设置 → 本地语音转写」里开启。', 'This video has no captions and auto transcription is off. Enable it in Settings → Local transcription.'],
+      'transcribe.again': ['重新转写', 'Transcribe again'],
+      'transcribe.missing': ['无字幕', 'No captions'],
+      'transcribe.retry': ['重试转写', 'Retry transcription'],
+      'transcribe.start': ['本地转写', 'Transcribe locally'],
+      'transcribe.working': ['转写中…', 'Transcribing…'],
+      'error.model-load': ['读取模型信息失败：{message}', 'Failed to load model info: {message}'],
+      'error.model-download': ['下载模型失败：{message}', 'Model download failed: {message}'],
+      'error.model-cancelled': ['已取消下载模型', 'Model download cancelled'],
+      'toast.modelDone': ['模型已下载完成', 'Models downloaded'],
+      'toast.pathSaved': ['路径已保存，正在重新检测…', 'Path saved, re-checking…'],
       'toast.askTip': ['后台解析中，完成后会自动回填总结', 'Background analysis is running; the summary will fill in when done'],
       'chapters.untitled': ['(未命名章节)', '(Untitled chapter)'],
       'transcript.toggleOn': ['关闭双语对照', 'Turn off bilingual view'],
@@ -810,6 +860,45 @@ window.__ModuleLoader__.load({
         at: stamp(message.at),
       }));
       return cache;
+    }
+
+
+    /* ---- 本机组件的可配置路径与模型下载（task-28） ---- */
+
+    const SETUP_KEY = 'dsh-video.setupDismissed';
+    function readSetupDismissed() {
+      try { return localStorage.getItem(SETUP_KEY) === '1'; } catch { return false; }
+    }
+    function writeSetupDismissed() {
+      try { localStorage.setItem(SETUP_KEY, '1'); } catch { /* ignore */ }
+    }
+
+    const ASR_BINARIES = [
+      ['ffmpeg', 'asr.comp.ffmpeg', 'ffmpegPath'],
+      ['ytdlp', 'asr.comp.ytdlp', 'ytdlpPath'],
+      ['whisper', 'asr.comp.whisper', 'whisperBinaryPath'],
+      ['sherpa', 'asr.comp.sherpa', 'sherpaBinaryPath'],
+    ];
+
+    function fmtBytes(bytes) {
+      const size = Number(bytes);
+      if (!Number.isFinite(size) || size <= 0) return '';
+      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let value = size;
+      let index = 0;
+      while (value >= 1024 && index < units.length - 1) { value /= 1024; index += 1; }
+      const text = value >= 10 || index === 0 ? String(Math.round(value)) : String(Math.round(value * 10) / 10);
+      return `${text} ${units[index]}`;
+    }
+
+    function friendlyModelError(error) {
+      const code = String(error?.code || '');
+      const message = String(error?.message || '').trim();
+      if (code === 'aborted') return t('error.model-cancelled');
+      if (code === 'model-unavailable' || code === 'download-failed' || code === 'http-error' || code === 'network-error') {
+        return t('error.model-download', { message: message || code });
+      }
+      return t('error.model-download', { message: message || code || t('common.unknown', { fallback: 'unknown' }) });
     }
 
     function friendlyResolveError(error, rawUrl) {
@@ -2696,7 +2785,135 @@ window.__ModuleLoader__.load({
      * 设置里的「本地语音转写」区块：开关 / 引擎 / 线程数 / 时长上限 / 保留音频 /
      * 本机组件与模型路径 / host 返回的安装提示。改任一设置都会立即 POST 生效。
      */
-    function AsrSection({ asr, saving, note, error, onConfig }) {
+
+    /**
+     * 一行可编辑路径：用于本机组件可执行文件与模型文件。
+     * 输入框留空 = 使用 host 默认路径；点「保存路径」才提交。
+     */
+    function AsrPathRow({ label, value, placeholder, saving, onSave }) {
+      const [draft, setDraft] = useState(String(value ?? ''));
+      useEffect(() => { setDraft(String(value ?? '')); }, [value]);
+      const commit = () => {
+        const next = String(draft ?? '').trim();
+        setDraft(next);
+        if (next !== String(value ?? '')) onSave(next);
+      };
+      return h('div', { className: 'dvv-path-row' }, [
+        h('span', { key: 'l', className: 'dvv-label dvv-path-label' }, label),
+        h('input', {
+          key: 'i', className: 'dvv-input dvv-path-input', type: 'text', value: draft,
+          placeholder, spellCheck: false,
+          onChange: (event) => setDraft(event.target.value),
+          onKeyDown: (event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); } },
+        }),
+        h('button', {
+          key: 'b', type: 'button', className: 'dvv-btn dvv-btn-sm', disabled: Boolean(saving), onClick: commit,
+        }, t('asr.comp.save')),
+      ]);
+    }
+
+    /**
+     * 模型卡片：Whisper / SenseVoice 的文件路径、大小与下载按钮（SSE 进度）。
+     */
+    function AsrModelsBlock({ models, error, downloading, saving, onDownload, onCancel, onSavePath }) {
+      const rows = [h('div', { key: 'head', className: 'dvv-asr-head' }, h('span', { className: 'dvv-label' }, t('asr.models.title')))];
+      if (!models) {
+        rows.push(h('div', { key: 'loading', className: 'dvv-note' }, error ? t('error.model-load', { message: error }) : t('asr.models.loading')));
+        return h('div', { className: 'dvv-model-box' }, rows);
+      }
+      const list = ['whisper', 'sensevoice'].filter((id) => models[id]).map((id) => {
+        const meta = models[id] || {};
+        const files = Array.isArray(meta.files) ? meta.files : [];
+        const busy = downloading && downloading.id === id && downloading.loading;
+        const rawPercent = busy ? downloading.percent : null;
+        const percent = rawPercent === null || rawPercent === undefined || rawPercent === '' ? null
+          : (Number.isFinite(Number(rawPercent)) ? Math.max(0, Math.min(100, Number(rawPercent))) : null);
+        const exists = files.some((file) => file && file.exists);
+        const fileRows = files.map((file) => {
+          const label = file.key === 'sensevoiceTokensPath' ? t('asr.models.tokens') : t('asr.models.path');
+          const size = fmtBytes(file.expectedBytes);
+          return h('div', { key: `f-${file.key}`, className: 'dvv-model-file' }, [
+            h('div', { key: 'k', className: 'dvv-label' }, `${label}${size ? ` · ${size}` : ''}${file.exists ? '' : `（${t('asr.models.missing')}）`}`),
+            h(AsrPathRow, {
+              key: 'p', value: '', placeholder: String(file.path || t('asr.comp.placeholder')),
+              saving: Boolean(saving),
+              onSave: (text) => onSavePath(file.key, text),
+            }),
+          ]);
+        });
+        return h('div', { key: `m-${id}`, className: 'dvv-model-card' }, [
+          h('div', { key: 'h', className: 'dvv-model-head' }, [
+            h('span', { key: 't', className: 'dvv-label' }, String(meta.label || id)),
+            h('span', {
+              key: 's', className: 'dvv-mini', 'data-ok': meta.available ? 'true' : 'false',
+            }, meta.available ? t('asr.models.ready') : t('asr.models.missing')),
+            h('div', { key: 'sp', className: 'dvv-actions-spacer' }),
+            busy
+              ? h('button', { key: 'c', type: 'button', className: 'dvv-btn dvv-btn-sm', onClick: () => onCancel() }, t('asr.models.cancel'))
+              : h('button', {
+                  key: 'd', type: 'button', className: 'dvv-btn dvv-btn-sm dvv-btn-primary',
+                  onClick: () => onDownload(id, exists),
+                }, exists ? t('asr.models.redownload') : t('asr.models.download')),
+          ]),
+          ...fileRows,
+          busy ? h('div', { key: 'p', className: 'dvv-model-progress' }, [
+            h('span', { key: 'l', className: 'dvv-note' }, `${downloading.phase || t('asr.models.downloading')}${percent === null ? '' : ` ${Math.round(percent)}%`}`),
+            h(AsrProgress, { key: 'b', percent }),
+          ]) : null,
+        ].filter(Boolean));
+      });
+      rows.push(h('div', { key: 'cards', className: 'dvv-model-cards' }, list));
+      return h('div', { className: 'dvv-model-box' }, rows);
+    }
+
+    /** 按平台给出可复制的安装命令与下载提示。 */
+    function AsrInstallBlock({ platform, onCopied }) {
+      const isWin = /win/i.test(String(platform || ''));
+      const commands = isWin
+        ? ['winget install Gyan.FFmpeg', 'winget install yt-dlp.yt-dlp']
+        : ['brew install ffmpeg yt-dlp whisper.cpp'];
+      const notes = isWin
+        ? ['https://github.com/ggml-org/whisper.cpp/releases · whisper-bin-x64.zip', 'https://github.com/k2-fsa/sherpa-onnx/releases']
+        : ['https://github.com/k2-fsa/sherpa-onnx/releases'];
+      const copy = (text) => {
+        void copyText(text).then((ok) => { if (ok) onCopied && onCopied(); });
+      };
+      const rows = [h('div', { key: 'head', className: 'dvv-asr-head' }, h('span', { className: 'dvv-label' }, t('asr.install.title')))];
+      rows.push(h('div', { key: 'hint', className: 'dvv-note' }, isWin ? t('asr.install.winHint') : t('asr.install.macHint')));
+      commands.forEach((command, index) => {
+        rows.push(h('div', { key: `cmd-${index}`, className: 'dvv-cmd-row' }, [
+          h('code', { key: 'c', className: 'dvv-cmd' }, command),
+          h('button', { key: 'b', type: 'button', className: 'dvv-btn dvv-btn-sm', onClick: () => copy(command) }, t('asr.install.copy')),
+        ]));
+      });
+      if (isWin) {
+        rows.push(h('div', { key: 'w-note', className: 'dvv-note' }, t('asr.install.whisperWin')));
+        rows.push(h('div', { key: 's-note', className: 'dvv-note' }, t('asr.install.sherpaWin')));
+      } else {
+        rows.push(h('div', { key: 's-note', className: 'dvv-note' }, t('asr.install.sherpaMac')));
+      }
+      notes.forEach((note, index) => {
+        rows.push(h('div', { key: `url-${index}`, className: 'dvv-note dvv-mono' }, note));
+      });
+      return h('div', { className: 'dvv-install-box' }, rows);
+    }
+
+    /** 首页「环境准备」提示卡：本地转写没就绪时引导去设置，可手动关闭。 */
+    function SetupCard({ onOpen, onDismiss }) {
+      return h('div', { className: 'dvv-setup-card' }, [
+        h('div', { key: 'main', className: 'dvv-setup-main' }, [
+          h('div', { key: 't', className: 'dvv-label' }, t('setup.title')),
+          h('div', { key: 'b', className: 'dvv-note' }, t('setup.body')),
+          h('button', { key: 'go', type: 'button', className: 'dvv-btn dvv-btn-sm dvv-btn-primary', onClick: onOpen }, t('setup.go')),
+        ]),
+        h('button', {
+          key: 'x', type: 'button', className: 'dvv-btn dvv-btn-sm dvv-setup-close',
+          title: t('setup.dismiss'), 'aria-label': t('setup.dismiss'), onClick: onDismiss,
+        }, '×'),
+      ]);
+    }
+
+    function AsrSection({ asr, saving, note, error, onConfig, onRefresh, models, modelsError, downloading, onDownloadModel, onCancelDownload, onCopied }) {
       if (!asr) {
         return h('div', { className: 'dvv-asr-box' }, [
           h('div', { key: 't', className: 'dvv-label' }, '本地语音转写'),
@@ -2705,11 +2922,11 @@ window.__ModuleLoader__.load({
       }
       const config = asr.config || {};
       const tools = asr.tools || {};
-      const models = asr.models || {};
+      const modelsInfo = asr.models || {};
       const engines = asr.engines || {};
       const hints = Array.isArray(asr.hints) ? asr.hints.filter(Boolean) : [];
-      const whisperModel = (models.whisper || {}).path || '';
-      const senseVoice = models.sensevoice || {};
+      const whisperModel = (modelsInfo.whisper || {}).path || '';
+      const senseVoice = modelsInfo.sensevoice || {};
       const engineLabel = (key) => {
         const meta = engines[key];
         return `${(meta && meta.label) || key}${meta && meta.available === false ? '（未就绪）' : ''}`;
@@ -2844,26 +3061,33 @@ window.__ModuleLoader__.load({
         h('input', { key: 'c', type: 'checkbox', checked: Boolean(config.keepAudio), onChange: () => onConfig({ keepAudio: !config.keepAudio }) }),
         h('span', { key: 't' }, '保留临时音频（~/.dsh/video-models/last-audio.*，默认不保留）'),
       ]));
-      rows.push(h('div', { key: 'tools', className: 'dvv-label' }, '本机组件'));
-      ASR_TOOLS.forEach(([key, label]) => {
+      rows.push(h('div', { key: 'tools-head', className: 'dvv-asr-head' }, [
+        h('span', { key: 't', className: 'dvv-label' }, t('asr.comp.title')),
+        h('button', { key: 'r', type: 'button', className: 'dvv-btn dvv-btn-sm', onClick: () => { if (onRefresh) onRefresh(); } }, t('asr.comp.refresh')),
+      ]));
+      ASR_BINARIES.forEach(([key, labelKey, configKey]) => {
         const tool = tools[key] || {};
         const available = Boolean(tool.available);
-        rows.push(h('div', { key: `tool-${key}`, className: 'dvv-cap' }, [
+        rows.push(h('div', { key: `tool-${key}`, className: 'dvv-path-line' }, [
           h('span', { key: 'd', className: 'dvv-cap-dot', 'data-ok': available ? 'true' : 'false' }),
-          h('span', { key: 'n', className: 'dvv-cap-text' }, `${label}：${available ? '可用' : '未找到'}${tool.path ? ` · ${tool.path}` : ''}`),
+          h('span', { key: 'l', className: 'dvv-label dvv-path-label' }, `${t(labelKey)} · ${available ? t('asr.comp.available') : t('asr.comp.missing')}`),
+          h(AsrPathRow, {
+            key: 'p', value: String(config[configKey] || ''), placeholder: String(tool.path || t('asr.comp.placeholder')),
+            saving: Boolean(saving), onSave: (text) => onConfig({ [configKey]: text }),
+          }),
         ]));
       });
-      rows.push(h('div', { key: 'models', className: 'dvv-asr-models' }, [
-        h('div', { key: 'l', className: 'dvv-label' }, '本地模型'),
-        h('div', { key: 'w', className: 'dvv-kv' }, [
-          h('span', { key: 'k', className: 'dvv-label' }, 'Whisper'),
-          h('span', { key: 'v', className: 'dvv-mono' }, whisperModel || '未下载（首次转写会按设置自动下载）'),
-        ]),
-        h('div', { key: 'sv', className: 'dvv-kv' }, [
-          h('span', { key: 'k', className: 'dvv-label' }, 'SenseVoice'),
-          h('span', { key: 'v', className: 'dvv-mono' }, senseVoice.modelPath ? `${senseVoice.modelPath}${senseVoice.tokensPath ? ` · ${senseVoice.tokensPath}` : ''}` : '未下载'),
-        ]),
-      ]));
+      rows.push(h(AsrModelsBlock, {
+        key: 'model-cards', models: models || null, error: modelsError || '',
+        downloading: downloading || null, saving: Boolean(saving),
+        onDownload: (id, force) => { if (onDownloadModel) onDownloadModel(id, force); },
+        onCancel: () => { if (onCancelDownload) onCancelDownload(); },
+        onSavePath: (configKey, text) => onConfig({ [configKey]: text }),
+      }));
+      rows.push(h(AsrInstallBlock, {
+        key: 'install', platform: String(tools.platform || ''),
+        onCopied: () => { if (onCopied) onCopied(); },
+      }));
       hints.forEach((hint, index) => {
         rows.push(h('div', { key: `hint-${index}`, className: 'dvv-note' }, `提示：${hint}`));
       });
@@ -2874,7 +3098,7 @@ window.__ModuleLoader__.load({
 
     /* -------------------------------------------------------------- 设置弹层 */
 
-    function SettingsModal({ status, cookie, saving, note, onCookie, onSave, onClear, onClose, onRefresh, asr, asrSaving, asrNote, asrError, onAsrConfig, doc, onClearAnalysis, onClearChat, lang, onLang }) {
+    function SettingsModal({ status, cookie, saving, note, onCookie, onSave, onClear, onClose, onRefresh, asr, asrSaving, asrNote, asrError, onAsrConfig, doc, onClearAnalysis, onClearChat, lang, onLang, asrModels, asrModelsError, modelDownloading, onDownloadModel, onCancelDownload, onRefreshAsr }) {
       // 「清空本视频分析缓存」的二次确认只影响当前打开的视频。
       const [confirmCache, setConfirmCache] = useState(false);
       const model = status && status.model ? `${status.model.provider ?? '?'} · ${status.model.model ?? '?'}` : '未获取到（插件主机可能还没就绪）';
@@ -2954,7 +3178,10 @@ window.__ModuleLoader__.load({
           ]) : null,
           h(AsrSection, {
             key: 'asr', asr, saving: asrSaving, note: asrNote, error: asrError,
-            onConfig: onAsrConfig,
+            onConfig: onAsrConfig, onRefresh: onRefreshAsr || onRefresh,
+            models: asrModels && asrModels.models ? asrModels.models : null, modelsError: asrModelsError, downloading: modelDownloading,
+            onDownloadModel, onCancelDownload,
+            onCopied: () => {},
           }),
         ]),
       ]));
@@ -2998,6 +3225,10 @@ window.__ModuleLoader__.load({
       const [asrError, setAsrError] = useState('');
       const [asrSaving, setAsrSaving] = useState(false);
       const [asrNote, setAsrNote] = useState('');
+      const [asrModels, setAsrModels] = useState(null);
+      const [asrModelsError, setAsrModelsError] = useState('');
+      const [modelDl, setModelDl] = useState({ id: '', loading: false, phase: '', percent: null });
+      const [setupDismissed, setSetupDismissed] = useState(() => readSetupDismissed());
       const [transcribe, setTranscribe] = useState(EMPTY_TRANSCRIBE);
       const [mindmap, setMindmap] = useState(EMPTY_MINDMAP);
       const [titlesLoading, setTitlesLoading] = useState(false);
@@ -3107,9 +3338,9 @@ window.__ModuleLoader__.load({
 
       /* ---- 本地语音转写：状态与设置（GET /asr/status、POST /asr/config） ---- */
 
-      const refreshAsr = useCallback(async () => {
+      const refreshAsr = useCallback(async (fresh) => {
         try {
-          const value = await call('asr/status');
+          const value = await call('asr/status', fresh ? { fresh: 1 } : undefined);
           if (!mounted.current) return;
           setAsr(value || {});
           setAsrError('');
@@ -3137,6 +3368,80 @@ window.__ModuleLoader__.load({
           if (mounted.current) setAsrSaving(false);
         }
       }, [refreshAsr]);
+
+      /** 模型文件信息（GET /asr/models）。 */
+      const loadAsrModels = useCallback(async () => {
+        try {
+          const value = await call('asr/models');
+          if (!mounted.current) return;
+          setAsrModels(value && value.models ? value : null);
+          setAsrModelsError('');
+        } catch (caught) {
+          if (!mounted.current) return;
+          setAsrModels(null);
+          setAsrModelsError(String(caught?.message ?? caught));
+        }
+      }, []);
+
+      const modelAbort = useRef(null);
+
+      /** 一键下载模型（POST /asr/models SSE，进度/取消）。 */
+      const downloadAsrModels = useCallback((id, force) => {
+        if (!id) return;
+        if (modelAbort.current) { try { modelAbort.current.abort(); } catch { /* ignore */ } }
+        const controller = new AbortController();
+        modelAbort.current = controller;
+        const target = id;
+        const previous = asrModels;
+        let streamError = null;
+        setModelDl({ id: target, loading: true, phase: t('asr.models.downloading'), percent: null });
+        void (async () => {
+          let finished = false;
+          try {
+            await streamSSE('asr/models', { id: target, force: Boolean(force) }, {
+              signal: controller.signal,
+              onEvent: (event) => {
+                if (!mounted.current) return 'stop';
+                if (event.type === 'phase') {
+                  setModelDl((cur) => (cur.id === target ? { ...cur, phase: String(event.text || t('asr.models.downloading')) } : cur));
+                } else if (event.type === 'progress') {
+                  const raw = event.percent;
+                  const percent = raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
+                  setModelDl((cur) => (cur.id === target ? {
+                    ...cur, percent: Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null,
+                  } : cur));
+                } else if (event.type === 'error') {
+                  streamError = makeError(event.message || String(event.code || 'error'), event.code || 'model-download');
+                  return 'stop';
+                } else if (event.type === 'done') {
+                  finished = true;
+                  return 'stop';
+                }
+                return undefined;
+              },
+            });
+            if (!mounted.current) return;
+            if (streamError) throw streamError;
+            if (!finished) throw makeError('internal', 'stream ended');
+            setModelDl({ id: '', loading: false, phase: '', percent: null });
+            showToast(t('toast.modelDone'));
+            await refreshAsr();
+            await loadAsrModels();
+          } catch (caught) {
+            if (!mounted.current) return;
+            setModelDl({ id: '', loading: false, phase: '', percent: null });
+            if (caught && caught.name === 'AbortError') { showToast(t('error.model-cancelled')); return; }
+            if (previous) setAsrModels(previous);
+            showToast(friendlyModelError(caught));
+          } finally {
+            if (modelAbort.current === controller) modelAbort.current = null;
+          }
+        })();
+      }, [asrModels, loadAsrModels, refreshAsr, showToast]);
+
+      const cancelModelDownload = useCallback(() => {
+        if (modelAbort.current) { try { modelAbort.current.abort(); } catch { /* ignore */ } }
+      }, []);
 
       /* ---- 历史：host 持久化（GET /history、POST /history/clear|remove） ---- */
 
@@ -4297,7 +4602,7 @@ window.__ModuleLoader__.load({
 
       /* ---------------------------------------------------------------- 渲染 */
 
-      const openSettings = () => { setOverlay('settings'); setCookieNote(''); setAsrNote(''); void refreshAsr(); };
+      const openSettings = () => { setOverlay('settings'); setCookieNote(''); setAsrNote(''); void refreshAsr(); void loadAsrModels(); };
 
       /** 历史项点击：host 记录里 url 是原链接，优先用 url 重新解析。 */
       const openHistoryItem = (item) => {
@@ -4474,6 +4779,12 @@ window.__ModuleLoader__.load({
             onSubmit: () => { void resolve(url); },
             onGoSettings: openSettings,
           }),
+          (asr && asr.ready === false && !setupDismissed)
+            ? h(SetupCard, {
+                key: 'setup', onOpen: openSettings,
+                onDismiss: () => { writeSetupDismissed(); setSetupDismissed(true); },
+              })
+            : null,
           historyItems.length
             ? h('div', { key: 'recent', className: 'dvv-home-recent' }, h(HistoryCards, {
                 items: historyItems, jobs: jobsByDoc, activeCount: jobsActiveCount,
@@ -4590,6 +4901,10 @@ window.__ModuleLoader__.load({
           onClose: () => setOverlay(''),
           onRefresh: () => { void refreshStatus(); void refreshAsr(); },
           asr, asrSaving, asrNote, asrError,
+          asrModels, asrModelsError, modelDownloading: modelDl,
+          onDownloadModel: (id, force) => downloadAsrModels(id, force),
+          onCancelDownload: cancelModelDownload,
+          onRefreshAsr: () => { void refreshAsr(true); void loadAsrModels(); },
           onAsrConfig: (patch) => { void submitAsrConfig(patch); },
           doc, lang: langSetting, onLang: changeLang,
           onClearAnalysis: (video) => { void clearAnalysisCache(video); },
@@ -4974,6 +5289,26 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-kf-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}.dvv-kf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}.dvv-kf-card{display:flex;flex-direction:column;gap:6px;padding:0;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);color:inherit;text-align:left;cursor:pointer;overflow:hidden}.dvv-kf-card:hover{border-color:var(--dsw-alias-brand-primary)}
 .dvv-kf-thumb{position:relative;width:100%;aspect-ratio:16/9;background:var(--dsw-alias-bg-layer-2)}.dvv-kf-ph{width:100%;height:100%;background:var(--dsw-alias-bg-layer-2)}.dvv-kf-img{display:block;width:100%;height:100%;object-fit:cover}.dvv-kf-time{position:absolute;left:6px;bottom:6px;padding:0 5px;border-radius:5px;font-size:11px;line-height:18px;background:var(--dsw-alias-bg-overlay);color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums}
 .dvv-kf-body{display:flex;flex-direction:column;gap:2px;padding:0 8px 8px;min-width:0}.dvv-kf-title{font-size:12px;line-height:17px;font-weight:600;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dvv-kf-desc{font-size:12px;line-height:17px;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}.dvv-kf-desc[data-empty="true"]{opacity:.6}
+/* 本机组件 / 模型下载 / 安装提示 / 首页环境准备卡（task-28） */
+.dvv-btn-sm{padding:4px 10px;font-size:12px}
+.dvv-btn-primary{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-base);border-color:transparent}
+.dvv-btn-primary:hover{opacity:.92}
+.dvv-path-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dvv-path-row{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.dvv-path-label{flex:none}
+.dvv-path-input{flex:1;min-width:180px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.dvv-model-box{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
+.dvv-model-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
+.dvv-model-card{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-base)}
+.dvv-model-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dvv-model-file{display:flex;flex-direction:column;gap:4px}
+.dvv-model-progress{display:flex;flex-direction:column;gap:6px}
+.dvv-install-box{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px dashed var(--dsw-alias-border-l2);border-radius:10px}
+.dvv-cmd-row{display:flex;align-items:center;gap:8px}
+.dvv-cmd{flex:1;min-width:0;overflow:auto;padding:6px 8px;border-radius:8px;background:var(--dsw-alias-bg-layer-2);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:nowrap}
+.dvv-setup-card{display:flex;gap:8px;align-items:flex-start;margin:0 0 14px;padding:12px 14px;border:1px solid var(--dsw-alias-border-l1);border-left:3px solid var(--dsw-alias-brand-primary);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
+.dvv-setup-main{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0}
+.dvv-setup-close{flex:none;padding:2px 8px;font-size:14px;line-height:1.2}
 @media (max-width:979px){
   /* 单列：播放器 → 页签（含字幕提示条） → 追问对话框，整页滚动。
      两栏用 display:contents 摊平，再靠 order 重排。 */

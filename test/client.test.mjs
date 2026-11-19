@@ -348,6 +348,39 @@ function sseResponse(events, signal) {
   return { ok: true, status: 200, body, json: async () => ({}), text: async () => '' };
 }
 
+function slowSseResponse(events, signal, holdMs = 260) {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream({
+    start(controller) {
+      let closed = false;
+      const abort = () => {
+        if (closed) return;
+        closed = true;
+        try { controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' })); } catch { /* ignore */ }
+      };
+      if (signal) {
+        if (signal.aborted) { abort(); return; }
+        signal.addEventListener('abort', abort);
+      }
+      try {
+        for (const event of events) {
+          if (closed) return;
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        }
+      } catch { /* ignore */ }
+      setTimeout(() => {
+        if (closed) return;
+        closed = true;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', downloaded: true })}\n\n`));
+          controller.close();
+        } catch { /* ignore */ }
+      }, holdMs);
+    },
+  });
+  return { ok: true, status: 200, body, json: async () => ({}), text: async () => '' };
+}
+
 let routes = {};
 
 function fakeFetch(input, init, calls) {
@@ -368,10 +401,12 @@ function fakeFetch(input, init, calls) {
       if (result && typeof result.then === 'function') {
         return result.then((resolved) => {
           if (resolved && resolved.__sse) return sseResponse(resolved.__sse, call.signal);
+          if (resolved && resolved.__sseSlow) return slowSseResponse(resolved.__sseSlow, call.signal);
           return jsonResponse(resolved);
         });
       }
       if (result && result.__sse) return Promise.resolve(sseResponse(result.__sse, call.signal));
+      if (result && result.__sseSlow) return Promise.resolve(slowSseResponse(result.__sseSlow, call.signal));
       return Promise.resolve(jsonResponse(result));
     } catch (error) {
       return Promise.reject(error);
@@ -493,6 +528,23 @@ const ASR = {
     whisper: { available: true, label: 'Whisper（whisper.cpp）' },
     sensevoice: { available: true, label: 'SenseVoice（sherpa-onnx）' },
   },
+};
+
+const ASR_MODELS = {
+  models: {
+    whisper: {
+      id: 'whisper', label: 'Whisper large-v3-turbo（q5_0，约 574 MB）', available: false,
+      files: [{ key: 'whisperModelPath', path: '/Users/test/.dsh/video-models/ggml-large-v3-turbo-q5_0.bin', expectedBytes: 574041195, actualBytes: 0, exists: false }],
+    },
+    sensevoice: {
+      id: 'sensevoice', label: 'SenseVoice small（int8，约 240 MB）', available: false,
+      files: [
+        { key: 'sensevoiceModelPath', path: '/Users/test/.dsh/video-models/sensevoice/model.int8.onnx', expectedBytes: 239233841, actualBytes: 0, exists: false },
+        { key: 'sensevoiceTokensPath', path: '/Users/test/.dsh/video-models/sensevoice/tokens.txt', expectedBytes: 315894, actualBytes: 0, exists: false },
+      ],
+    },
+  },
+  catalog: [],
 };
 
 const SEGMENTS = [
@@ -825,6 +877,10 @@ let historyItems = [
   },
 ];
 
+let asrStatusOverride = null;
+let asrModelsValue = null;
+let modelDownloadMode = 'ok';
+
 function resetRoutes() {
   translateCache = null;
   routes = {
@@ -845,11 +901,17 @@ function resetRoutes() {
       historyItems = [];
       return { ok: true, value: { items: [] } };
     },
-    'asr/status': () => ({ ok: true, value: ASR }),
+    'asr/status': () => ({ ok: true, value: asrStatusOverride || ASR }),
+    'asr/models': (call) => {
+      if (call.method === 'GET') return { ok: true, value: asrModelsValue || ASR_MODELS };
+      if (modelDownloadMode === 'slow') return { __sseSlow: [{ type: 'phase', text: '正在下载模型…' }, { type: 'progress', stage: 'download', percent: null, received: 1024, total: 0 }] };
+      if (modelDownloadMode === 'error') return { __sse: [{ type: 'phase', text: '正在下载模型…' }, { type: 'error', code: 'http-error', message: 'HTTP 404' }] };
+      return { __sse: [{ type: 'phase', text: '正在下载模型…' }, { type: 'progress', stage: 'download', percent: 42, received: 1024, total: 2048 }, { type: 'done', downloaded: true }] };
+    },
     'asr/config': (call) => {
       const body = call.body || {};
       for (const key of ['enabled', 'engine']) if (key in body) ASR[key] = body[key];
-      for (const key of ['threads', 'maxSeconds', 'keepAudio', 'autoTranscribe', 'crossCheck', 'ocrFallback', 'ocrIntervalSeconds', 'ocrMaxFrames', 'frameMode', 'visionModel', 'visionMaxFrames']) {
+      for (const key of ['threads', 'maxSeconds', 'keepAudio', 'autoTranscribe', 'crossCheck', 'ocrFallback', 'ocrIntervalSeconds', 'ocrMaxFrames', 'frameMode', 'visionModel', 'visionMaxFrames', 'ffmpegPath', 'ytdlpPath', 'whisperBinaryPath', 'sherpaBinaryPath', 'whisperModelPath', 'sensevoiceModelPath', 'sensevoiceTokensPath']) {
         if (key in body) ASR.config[key] = body[key];
       }
       if (ASR.vision && ASR.vision.config) {
@@ -2232,6 +2294,125 @@ check('切回 auto 后语言设置持久化', sandbox.__store.get('dsh-video.lan
 if (!clickText(tree, 'Close')) clickText(tree, '关闭');
 tree = await settle();
 check('auto 且无 locale 时中文兜底', nodeText(tree).includes('重新生成') || nodeText(tree).includes('返回'));
+
+
+
+/* ---------------------------------------------------------------- task-28：本机组件 / 模型下载 / 环境准备 */
+
+const exactButton = (root, text) => findAll(root, (n) => n.__host === 'element' && n.tag === 'button' && nodeText(n) === text)[0];
+
+// 打开设置：进入时拉取模型信息
+clickText(tree, '设置');
+tree = await settle(40);
+check('task28 打开设置拉取模型信息', callsOf('asr/models').filter((call) => call.method === 'GET').length >= 1);
+
+// 四个本机组件状态行 + 可编辑路径
+check('task28 四个本机组件显示可用', ['ffmpeg', 'yt-dlp', 'whisper-cli', 'sherpa-onnx'].every((name) => nodeText(tree).includes(`${name} · 可用`)));
+const toolRows = allByClass(tree, 'dvv-path-line');
+check('task28 组件行带路径输入', toolRows.length >= 4 && Boolean(byClass(tree, 'dvv-path-input')));
+
+// placeholder 用 host 默认路径
+const ffInput = findAll(tree, (n) => n.__host === 'element' && n.tag === 'input' && n.props && n.props.placeholder === '/opt/homebrew/bin/ffmpeg')[0];
+check('task28 路径 placeholder 为 host 默认路径', Boolean(ffInput));
+
+// 保存路径 → POST /asr/config
+change(ffInput, '/custom/ffmpeg');
+tree = await settle();
+const firstToolRow = allByClass(tree, 'dvv-path-line')[0];
+const savePathBtn = exactButton(firstToolRow, '保存路径');
+check('task28 组件行有保存路径按钮', Boolean(savePathBtn));
+if (savePathBtn) click(savePathBtn);
+tree = await settle(40);
+const savedCfg = callsOf('asr/config').slice(-1)[0];
+check('task28 保存路径提交 ffmpegPath', Boolean(savedCfg) && savedCfg.body && savedCfg.body.ffmpegPath === '/custom/ffmpeg');
+
+// 重新检测（fresh=1）
+clickText(tree, '重新检测');
+tree = await settle(40);
+const recheck = callsOf('asr/status').slice(-1)[0];
+check('task28 重新检测带 fresh=1', Boolean(recheck) && recheck.params && recheck.params.fresh === '1');
+
+// 模型卡片
+check('task28 模型卡片渲染', nodeText(tree).includes('模型文件') && nodeText(tree).includes('Whisper large-v3-turbo') && nodeText(tree).includes('574 MB'));
+const modelCards = allByClass(tree, 'dvv-model-card');
+check('task28 Whisper/SenseVoice 两张卡片', modelCards.length === 2);
+const modelPathInputs = findAll(tree, (n) => n.__host === 'element' && n.tag === 'input' && n.props && String(n.props.className || '').includes('dvv-path-input'));
+check('task28 模型路径输入共 3 个（含 SenseVoice 词表）', modelPathInputs.length >= 7);
+
+// 一键下载 Whisper
+const dlBtn = modelCards[0] ? exactButton(modelCards[0], '下载') : null;
+check('task28 模型卡有下载按钮', Boolean(dlBtn));
+if (dlBtn) click(dlBtn);
+tree = await settle(60);
+const dlCall = callsOf('asr/models').filter((call) => call.method === 'POST').slice(-1)[0];
+check('task28 下载请求体 id=whisper force=false', Boolean(dlCall) && dlCall.body && dlCall.body.id === 'whisper' && dlCall.body.force === false);
+check('task28 下载完成 toast 并刷新状态', nodeText(tree).includes('模型已下载完成'));
+
+// 慢速下载：进度条 + 取消
+modelDownloadMode = 'slow';
+const dlBtn2 = allByClass(tree, 'dvv-model-card')[0] ? exactButton(allByClass(tree, 'dvv-model-card')[0], '下载') : null;
+if (dlBtn2) click(dlBtn2);
+tree = await settle(12);
+check('task28 下载中显示取消按钮', Boolean(buttonByText(tree, '取消下载')));
+const progressNode = byClass(tree, 'dvv-progress');
+check('task28 下载中进度条不确定态', Boolean(progressNode) && progressNode.props['data-indeterminate'] === 'true');
+clickText(tree, '取消下载');
+tree = await settle(30);
+check('task28 取消下载提示', nodeText(tree).includes('已取消下载模型'));
+
+// 下载失败文案
+modelDownloadMode = 'error';
+const dlBtn3 = allByClass(tree, 'dvv-model-card')[0] ? exactButton(allByClass(tree, 'dvv-model-card')[0], '下载') : null;
+if (dlBtn3) click(dlBtn3);
+tree = await settle(60);
+check('task28 下载失败中文提示', nodeText(tree).includes('下载模型失败') && nodeText(tree).includes('HTTP 404'));
+modelDownloadMode = 'ok';
+
+// macOS 安装命令与复制
+check('task28 macOS 安装命令', nodeText(tree).includes('brew install ffmpeg yt-dlp whisper.cpp'));
+const cl = sandbox.__clipboardWrites.length;
+const copyCmd = buttonByText(tree, '复制');
+if (copyCmd) click(copyCmd);
+tree = await settle();
+check('task28 安装命令可复制', sandbox.__clipboardWrites.length === cl + 1 && String(sandbox.__clipboardWrites.slice(-1)[0]).includes('brew install ffmpeg yt-dlp whisper.cpp'));
+
+// Windows 平台安装提示
+asrStatusOverride = JSON.parse(JSON.stringify(ASR));
+asrStatusOverride.tools.platform = 'win32';
+clickText(tree, '重新检测');
+tree = await settle(40);
+check('task28 Windows 安装命令', nodeText(tree).includes('winget install Gyan.FFmpeg') && nodeText(tree).includes('winget install yt-dlp.yt-dlp') && nodeText(tree).includes('whisper-bin-x64.zip'));
+asrStatusOverride = null;
+
+// 关闭设置
+if (!clickText(tree, '关闭')) clickText(tree, 'Close');
+tree = await settle(30);
+
+// 首页环境准备卡：asr.ready=false
+asrStatusOverride = { ...JSON.parse(JSON.stringify(ASR)), ready: false };
+clickText(tree, '设置');
+tree = await settle(40);
+if (!clickText(tree, '关闭')) clickText(tree, 'Close');
+tree = await settle(30);
+clickText(tree, '返回');
+tree = await settle(40);
+check('task28 首页环境准备卡显示', Boolean(byClass(tree, 'dvv-setup-card')) && nodeText(tree).includes('环境准备'));
+const setupClose = byClass(tree, 'dvv-setup-close');
+if (setupClose) click(setupClose);
+tree = await settle();
+check('task28 关闭环境准备卡写入 localStorage', sandbox.__store.get('dsh-video.setupDismissed') === '1' && !byClass(tree, 'dvv-setup-card'));
+asrStatusOverride = null;
+
+// 英文文案
+clickText(tree, '设置');
+tree = await settle(40);
+clickText(tree, 'English');
+tree = await settle(40);
+check('task28 英文组件/模型/安装文案', nodeText(tree).includes('Local tools') && nodeText(tree).includes('Model files') && nodeText(tree).includes('Re-check') && nodeText(tree).includes('Installation'));
+clickText(tree, 'Follow DSH');
+tree = await settle(40);
+if (!clickText(tree, 'Close')) clickText(tree, '关闭');
+tree = await settle(30);
 
 
 check('渲染期间没有运行时异常', runtimeErrors.length === 0);
