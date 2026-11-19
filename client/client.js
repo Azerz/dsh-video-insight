@@ -30,6 +30,328 @@ window.__ModuleLoader__.load({
       catch { return '/dsh-video/api/'; }
     })();
 
+
+    /* ------------------------------------------------------------------ i18n */
+
+    const LANG_KEY = 'dsh-video.lang';
+    const AI_LANGS = ['ja', 'es', 'fr', 'de', 'ru', 'pt'];
+    const LANG_OPTIONS = [['auto', 'settings.langAuto'], ['zh', 'settings.langZh'], ['en', 'settings.langEn']];
+    let localeService = null;
+    let activeUiLang = 'zh';
+
+    /** 文案表：key → [中文, English]。{name} 形式占位由 t() 替换。 */
+    const STRINGS = {
+      'tab.summary': ['总结', 'Summary'],
+      'tab.chapters': ['章节', 'Chapters'],
+      'tab.transcript': ['原文', 'Transcript'],
+      'tab.storyboard': ['分镜', 'Storyboard'],
+      'tab.mindmap': ['思维导图', 'Mindmap'],
+      'app.title': ['视频解析', 'Video Insights'],
+      'app.subtitle': ['粘贴一条链接，30 秒看清一个视频值不值得看。', 'Paste a link and see in 30 seconds whether a video is worth watching.'],
+      'home.placeholder': ['粘贴视频链接，例如 https://www.youtube.com/watch?v=... 或 https://www.bilibili.com/video/BV...', 'Paste a video link, e.g. https://www.youtube.com/watch?v=... or https://www.bilibili.com/video/BV...'],
+      'home.enter': ['粘贴后回车解析', 'Paste and press Enter'],
+      'home.resolve': ['解析', 'Analyze'],
+      'home.resolving': ['解析中…', 'Analyzing…'],
+      'home.cookieHint': ['B 站 AI 字幕需要登录 Cookie：', 'Bilibili AI captions require a signed-in cookie:'],
+      'home.goSettings': ['去设置', 'Settings'],
+      'home.recent': ['最近分析', 'Recent analyses'],
+      'home.recentCount': ['共 {n} 条 · 最多保留 {max} 条', '{n} items · up to {max} kept'],
+      'home.parseAll': ['全部解析', 'Analyze all'],
+      'home.parsingN': ['解析中 {n}', 'Analyzing {n}'],
+      'home.openAll': ['打开历史查看全部', 'Open history'],
+      'home.empty': ['还没有分析记录，粘贴一个链接开始吧。', 'No analyses yet. Paste a link to get started.'],
+      'home.ex1': ['TED 演讲 · 24min', 'TED talk · 24min'],
+      'home.ex2': ['哔哩哔哩科普 · 16min', 'Bilibili explainer · 16min'],
+      'home.ex3': ['无字幕动画 · 10min', 'Animation without captions · 10min'],
+      'home.hostError': ['插件主机未就绪：{err}（面板要等 host 半启动后才能解析）', 'Plugin host is not ready: {err} (the panel needs the host side running before analyzing)'],
+      'player.title': ['播放器', 'Player'],
+      'player.collapsed': ['播放器已收起', 'Player collapsed'],
+      'player.open': ['在 {name} 打开', 'Open on {name}'],
+      'player.expand': ['展开播放器', 'Expand player'],
+      'player.collapse': ['收起播放器', 'Collapse player'],
+      'player.empty': ['当前环境无法内嵌播放器', 'Inline player is unavailable here'],
+      'player.emptyNote': ['请用「在 {name} 打开」在新窗口播放。', 'Use “Open on {name}” to watch in a new window.'],
+      'toolbar.back': ['← 返回', '← Back'],
+      'toolbar.backHome': ['返回首页', 'Back to home'],
+      'toolbar.backUp': ['返回上一级', 'Back'],
+      'toolbar.history': ['历史', 'History'],
+      'toolbar.historyN': ['历史 {n}', 'History {n}'],
+      'toolbar.settings': ['设置', 'Settings'],
+      'toolbar.regenerate': ['重新生成 ▾', 'Regenerate ▾'],
+      'toolbar.regenSummary': ['重新生成总结', 'Regenerate summary'],
+      'toolbar.regenMindmap': ['重新生成思维导图', 'Regenerate mindmap'],
+      'toolbar.regenStoryboard': ['重新生成分镜', 'Regenerate storyboard'],
+      'toolbar.export': ['导出 ▾', 'Export ▾'],
+      'toolbar.copyMd': ['复制 Markdown', 'Copy Markdown'],
+      'toolbar.downloadMd': ['下载 .md', 'Download .md'],
+      'toolbar.copyFull': ['复制全文', 'Copy full text'],
+      'toolbar.expandMeta': ['展开视频信息', 'Show video details'],
+      'toolbar.collapseMeta': ['收起视频信息', 'Hide video details'],
+      'meta.duration': ['时长 {t}', 'Duration {t}'],
+      'stat.views': ['播放', 'views'],
+      'stat.likes': ['点赞', 'likes'],
+      'stat.comments': ['评论', 'comments'],
+      'job.bg': ['后台解析 {pct}% · {stage}', 'Background analysis {pct}% · {stage}'],
+      'job.cancelBg': ['取消后台解析', 'Cancel background analysis'],
+      'job.queued': ['排队中…', 'Queued…'],
+      'job.parsing': ['解析中…', 'Analyzing…'],
+      'job.done': ['已完成', 'Done'],
+      'job.failed': ['解析失败', 'Failed'],
+      'job.queueTitle': ['解析队列', 'Parse queue'],
+      'job.queueCount': ['解析队列 {done}/{total}', 'Parse queue {done}/{total}'],
+      'job.runningCount': ['{running} 个进行中 · {queued} 个排队', '{running} running · {queued} queued'],
+      'job.expand': ['展开', 'Expand'],
+      'job.running': ['运行中', 'Running'],
+      'job.recent': ['最近完成', 'Recently completed'],
+      'job.clearDone': ['清除已完成', 'Clear completed'],
+      'job.emptyDrawer': ['目前没有后台任务。在首页或历史里重新解析视频即可开始。', 'No background tasks. Re-analyze a video from the home page or history to start.'],
+      'job.untitled': ['未命名视频', 'Untitled video'],
+      'job.cancel': ['取消', 'Cancel'],
+      'job.retry': ['重试', 'Retry'],
+      'job.open': ['打开', 'Open'],
+      'history.title': ['历史记录', 'History'],
+      'history.search': ['搜索历史记录', 'Search history'],
+      'history.searchPlaceholder': ['搜索标题、作者或链接…', 'Search title, author or link…'],
+      'history.all': ['全部', 'All'],
+      'history.favorites': ['已收藏', 'Favorites'],
+      'history.clear': ['清空历史', 'Clear history'],
+      'history.clearConfirm': ['确认清空？', 'Clear all?'],
+      'history.empty': ['还没有分析记录。', 'No history yet.'],
+      'history.emptyNote': ['解析过的视频会出现在这里，最多保留 {max} 条。', 'Analyzed videos appear here, up to {max} kept.'],
+      'history.noMatch': ['没有匹配的历史记录', 'No matching history'],
+      'history.delete': ['删除', 'Delete'],
+      'history.favorite': ['收藏', 'Favorite'],
+      'history.unfavorite': ['取消收藏', 'Unfavorite'],
+      'history.maxNote': ['最多保留 {max} 条', 'Up to {max} kept'],
+      'common.cancel': ['取消', 'Cancel'],
+      'common.close': ['关闭', 'Close'],
+      'common.copied': ['已复制', 'Copied'],
+      'common.save': ['保存', 'Save'],
+      'common.saving': ['保存中…', 'Saving…'],
+      'common.clear': ['清除', 'Clear'],
+      'common.refresh': ['刷新状态', 'Refresh'],
+      'common.regenerate': ['重新生成', 'Regenerate'],
+      'common.copy': ['复制', 'Copy'],
+      'common.stop': ['停止', 'Stop'],
+      'common.expand': ['展开', 'Expand'],
+      'common.collapse': ['收起', 'Collapse'],
+      'common.expandAll': ['全部展开', 'Expand all'],
+      'common.collapseAll': ['全部收起', 'Collapse all'],
+      'common.retry': ['重试', 'Retry'],
+      'common.generate': ['生成', 'Generate'],
+      'common.generating': ['生成中…', 'Generating…'],
+      'common.cached': ['已缓存 · {when}', 'Cached · {when}'],
+      'summary.none': ['还没有生成总结。', 'No summary yet.'],
+      'summary.generate': ['生成总结', 'Generate summary'],
+      'summary.copyMd': ['复制 Markdown', 'Copy Markdown'],
+      'summary.download': ['下载 .md', 'Download .md'],
+      'summary.exportHint': ['先生成总结', 'Generate a summary first'],
+      'summary.bg': ['后台解析中 {pct}% · {stage}', 'Background analysis {pct}% · {stage}'],
+      'summary.bgNote': ['总结、章节、思维导图与分镜会在后台生成，完成后自动回填。', 'Summary, chapters, mindmap and storyboard are generated in the background and filled in automatically.'],
+      'summary.generating': ['正在生成总结…', 'Generating summary…'],
+      'summary.official': ['B 站官方 AI 摘要', 'Bilibili official AI summary'],
+      'summary.noCapTitle': ['这个视频没拿到字幕', 'No captions for this video'],
+      'summary.noCapBili': ['B 站需要登录 Cookie 才能读取 AI 字幕与官方总结。去「设置」粘贴 SESSDATA 后重新解析这个链接即可。', 'Bilibili needs a signed-in cookie to read AI captions and the official summary. Paste SESSDATA in Settings, then re-analyze this link.'],
+      'summary.noCapYt': ['YouTube 视频可能本身没有字幕，或作者关闭了自动字幕。', 'The YouTube video may have no captions, or the author disabled auto-captions.'],
+      'summary.more': ['展开更多', 'Show more'],
+      'summary.point': ['要点', 'Key points'],
+      'chapters.none': ['还没有可用的章节', 'No chapters available'],
+      'chapters.noneNote': ['这个视频可能太短，或者还没有字幕可以切分。', 'This video may be too short, or has no captions to split.'],
+      'chapters.loading': ['正在读取章节…', 'Loading chapters…'],
+      'chapters.count': ['{n} 节', '{n} sections'],
+      'chapters.list': ['列表', 'List'],
+      'chapters.grid': ['网格', 'Grid'],
+      'chapters.genDesc': ['生成画面描述', 'Generate descriptions'],
+      'chapters.regenDesc': ['重新生成描述', 'Regenerate descriptions'],
+      'chapters.genTitles': ['生成章节标题', 'Generate chapter titles'],
+      'chapters.noDoc': ['先解析一个视频，再来看章节。', 'Analyze a video first to see its chapters.'],
+      'chapters.noDocNote': ['在首页粘贴链接，解析完成后这里会列出章节。', 'Paste a link on the home page; chapters will appear here once analyzed.'],
+      'chapters.genProgress': ['正在生成画面描述…', 'Generating descriptions…'],
+      'chapters.goMindmap': ['去思维导图', 'Open mindmap'],
+      'chapters.titlesBusy': ['正在生成…', 'Generating…'],
+      'transcript.noCapTitle': ['这个视频没拿到字幕', 'No captions for this video'],
+      'transcript.noCapBili': ['B 站要登录 Cookie 才能读 AI 字幕。去「设置」里粘贴 SESSDATA，再重新解析。', 'Bilibili needs a signed-in cookie for AI captions. Paste SESSDATA in Settings and re-analyze.'],
+      'transcript.noCapYt': ['YouTube 视频可能没有字幕，或作者关闭了自动字幕。', 'The YouTube video may have no captions, or the author disabled auto-captions.'],
+      'transcript.search': ['在字幕里搜索关键词…', 'Search captions…'],
+      'transcript.searchAria': ['搜索字幕', 'Search captions'],
+      'transcript.count': ['共 {n} 条', '{n} segments'],
+      'transcript.copyAll': ['复制全部', 'Copy all'],
+      'transcript.bilingual': ['双语', 'Bilingual'],
+      'transcript.follow': ['跟随', 'Follow'],
+      'transcript.empty': ['这个视频的字幕是空的。', 'Captions for this video are empty.'],
+      'transcript.noMatch': ['没有匹配的字幕。', 'No matching captions.'],
+      'transcript.translating': ['正在翻译字幕…', 'Translating captions…'],
+      'ask.title': ['追问', 'Ask'],
+      'ask.subtitle': ['基于当前视频的字幕回答', 'Answers based on this video’s captions'],
+      'ask.placeholder': ['就这个视频继续追问，Enter 发送 / Shift+Enter 换行', 'Ask follow-ups about this video; Enter to send, Shift+Enter for a new line'],
+      'ask.send': ['发送', 'Send'],
+      'ask.sending': ['生成中…', 'Generating…'],
+      'ask.examplesTitle': ['不知道问什么？从这三句开始：', 'Not sure what to ask? Start with these:'],
+      'ask.aiSuggest': ['AI 看完这个视频，猜你可能想问：', 'Suggested follow-ups:'],
+      'ask.thinking': ['正在思考…', 'Thinking…'],
+      'ask.citations': ['依据', 'Sources'],
+      'ask.ex1': ['这个视频最核心的论点是什么？', 'What is the core argument of this video?'],
+      'ask.ex2': ['作者的观点有哪些可疑之处？', 'What is questionable about the author’s claims?'],
+      'ask.ex3': ['用 5 句话讲给完全不懂的人听', 'Explain it in 5 sentences to a complete beginner'],
+      'mindmap.gen': ['重新生成', 'Regenerate'],
+      'mindmap.loading': ['正在生成思维导图…', 'Generating mindmap…'],
+      'mindmap.empty': ['还没有生成思维导图。点「重新生成」开始。', 'No mindmap yet. Click “Regenerate” to start.'],
+      'mindmap.expandAll': ['全部展开', 'Expand all'],
+      'mindmap.collapseAll': ['全部收起', 'Collapse all'],
+      'mindmap.zoomIn': ['放大', 'Zoom in'],
+      'mindmap.zoomOut': ['缩小', 'Zoom out'],
+      'mindmap.generated': ['生成于 {when}', 'Generated {when}'],
+      'storyboard.gen': ['生成分镜', 'Generate storyboard'],
+      'storyboard.regen': ['重新生成', 'Regenerate'],
+      'storyboard.describe': ['附画面描述', 'Include descriptions'],
+      'storyboard.openLarge': ['打开大图', 'Open large image'],
+      'storyboard.empty': ['这个视频还没有分镜。点「生成分镜」开始。', 'No storyboard yet. Click “Generate storyboard” to start.'],
+      'storyboard.loading': ['正在读取分镜…', 'Loading storyboard…'],
+      'storyboard.loadingGen': ['正在生成分镜…', 'Generating storyboard…'],
+      'storyboard.cached': ['已缓存 · {when}', 'Cached · {when}'],
+      'storyboard.described': ['含描述', 'With descriptions'],
+      'storyboard.frameSample': ['按镜头切点抽帧', 'Frames at shot cuts'],
+      'storyboard.intervalSample': ['按间隔抽帧', 'Frames at intervals'],
+      'settings.title': ['设置', 'Settings'],
+      'settings.language': ['语言 / Language', 'Language / 语言'],
+      'settings.langAuto': ['跟随 DSH', 'Follow DSH'],
+      'settings.langZh': ['中文', 'Chinese'],
+      'settings.langEn': ['English', 'English'],
+      'settings.model': ['当前模型', 'Current model'],
+      'settings.cookie': ['B 站 Cookie', 'Bilibili cookie'],
+      'settings.cookieSet': ['已配置', 'Configured'],
+      'settings.cookieUnset': ['未配置', 'Not configured'],
+      'settings.cookieLabel': ['B 站 Cookie（SESSDATA）', 'Bilibili cookie (SESSDATA)'],
+      'settings.caps': ['各平台字幕能力', 'Caption support per platform'],
+      'settings.cacheTitle': ['本视频分析缓存', 'Analysis cache for this video'],
+      'settings.cacheNone': ['暂无缓存', 'No cache'],
+      'settings.clearChat': ['清空对话', 'Clear chat'],
+      'settings.clearCache': ['清空本视频分析缓存', 'Clear this video’s analysis cache'],
+      'settings.confirmClear': ['确认清空？', 'Clear?'],
+      'error.bad-url': ['没认出这个链接：请粘贴 YouTube 或哔哩哔哩的视频链接（支持 BV 号、分享短链）。', 'Unrecognized link: paste a YouTube or Bilibili video URL (BV id or share link works).'],
+      'error.not-found': ['没有找到这个视频，可能被删除或需要登录。', 'Video not found; it may be deleted or require sign-in.'],
+      'error.no-transcript': ['这个视频没有字幕，无法生成内容。可以先在设置里启用本地语音转写。', 'This video has no captions. You can enable local transcription in Settings.'],
+      'error.unsupported': ['不支持的视频链接。', 'Unsupported video link.'],
+      'error.internal': ['插件主机内部错误，请稍后重试。', 'Plugin host internal error; please retry later.'],
+      'error.no-model': ['没有可用的模型：请在设置里检查模型配置。', 'No model available; check the model configuration in Settings.'],
+      'error.llm-failed': ['模型调用失败，请稍后重试。', 'Model call failed; please retry later.'],
+      'error.llm-empty': ['模型没有返回内容，请重试。', 'The model returned nothing; please retry.'],
+      'error.bad-json': ['模型返回的内容无法解析，请重试。', 'The model response could not be parsed; please retry.'],
+      'error.asr-disabled': ['本地语音转写没有开启，去设置里打开。', 'Local transcription is disabled; enable it in Settings.'],
+      'error.asr-unavailable': ['本机转写组件还没装好：{message}', 'Local transcription tools are not installed: {message}'],
+      'error.toast.copied': ['已复制', 'Copied'],
+      'home.videoLink': ['视频链接', 'Video link'],
+      'player.frameTitle': ['视频播放器', 'Video player'],
+      'toolbar.noTitle': ['无标题视频', 'Untitled video'],
+      'meta.source': ['来源：{source}', 'Source: {source}'],
+      'mindmap.title': ['思维导图', 'Mindmap'],
+      'mindmap.model': ['当前模型', 'current model'],
+      'mindmap.emptyTitle': ['还没有生成思维导图', 'No mindmap yet'],
+      'mindmap.emptyNote': ['点「重新生成」开始生成。', 'Click “Regenerate” to start.'],
+      'mindmap.emptyDataTitle': ['导图内容是空的', 'Mindmap is empty'],
+      'mindmap.emptyDataNote': ['点「重新生成」再试一次。', 'Click “Regenerate” to try again.'],
+      'storyboard.noDocTitle': ['先解析一个视频，再来看它的分镜。', 'Analyze a video first to see its storyboard.'],
+      'storyboard.noDocNote': ['解析完成后「分镜」页会把整段视频的画面拼成网格。', 'Once analyzed, the Storyboard tab arranges the video frames into a grid.'],
+      'storyboard.justNow': ['刚刚生成', 'Just generated'],
+      'storyboard.failedTitle': ['分镜图加载失败', 'Storyboard image failed to load'],
+      'storyboard.frameAlt': ['{title} 的分镜图（第 {n} 张）', '{title} storyboard (image {n})'],
+      'storyboard.hint': ['把鼠标放到格子上可以看到画面描述；点击格子会跳到对应画面。', 'Hover a cell to see its description; click a cell to seek to that moment.'],
+      'transcript.countOf': ['共 {shown} 条 / 全部 {total} 条', '{shown} of {total} segments'],
+      'history.searchPlaceholder2': ['搜索标题 / 作者 / 链接', 'Search title / author / link'],
+      'history.recordsCount': ['历史记录 · {n}', 'History · {n}'],
+      'job.confirmParse': ['确认解析？', 'Start parsing?'],
+      'toast.favAdded': ['已收藏', 'Added to favorites'],
+      'toast.favRemoved': ['已取消收藏', 'Removed from favorites'],
+      'toast.parseDone': ['后台解析完成', 'Background analysis finished'],
+      'toast.parseCancelled': ['已取消后台解析', 'Background analysis cancelled'],
+      'toast.cookieSaved': ['已保存，B 站字幕能力已刷新', 'Saved; Bilibili caption access refreshed'],
+      'toast.cookieCleared': ['已清除 B 站 Cookie', 'Bilibili cookie cleared'],
+      'toast.copyFailed': ['复制失败，请手动选中文本复制', 'Copy failed; select the text and copy manually'],
+      'toast.sbCancelled': ['已取消生成分镜', 'Storyboard generation cancelled'],
+      'toast.cacheCleared': ['已清空本视频的分析缓存', 'Analysis cache cleared'],
+      'toast.chatCleared': ['已清空这个视频的对话记录', 'Chat history cleared'],
+      'toast.transcribeCancelled': ['已取消本地转写', 'Local transcription cancelled'],
+      'toast.summaryFirstCopy': ['先生成总结再复制', 'Generate a summary first'],
+      'toast.summaryFirstDownload': ['先生成总结再下载', 'Generate a summary first'],
+      'toast.mdDownloaded': ['已下载 Markdown 文件', 'Markdown file downloaded'],
+      'toast.noDocIdDelete': ['这条记录缺少 docId，无法删除', 'This record has no docId and cannot be deleted'],
+      'toast.historyDeleted': ['已删除这条记录', 'Record deleted'],
+      'toast.historyCleared': ['历史已清空', 'History cleared'],
+      'toast.noDocIdFav': ['这条记录缺少 docId，无法收藏', 'This record has no docId and cannot be favorited'],
+      'toast.bgRunning': ['后台解析中，完成后会自动回填总结', 'Background analysis is running; the summary will be filled in when done'],
+      'toast.visualsCancelled': ['已取消生成画面描述', 'Visual description generation cancelled'],
+      'toast.noDocIdCancel': ['这条任务缺少 docId，无法取消', 'This job has no docId and cannot be cancelled'],
+      'toast.noDocIdRetry': ['这条任务缺少 docId，无法重试', 'This job has no docId and cannot be retried'],
+      'toast.jobRequeued': ['已重新加入解析队列', 'Job queued again'],
+      'toast.jobsCleared': ['已清除已完成任务', 'Finished jobs cleared'],
+      'toast.noHistory': ['还没有历史记录可以解析', 'No history to analyze yet'],
+      'toast.translateCancelled': ['已取消翻译', 'Translation cancelled'],
+      'toast.noSegments': ['没有可复制的字幕', 'No captions to copy'],
+      'toast.askTip': ['后台解析中，完成后会自动回填总结', 'Background analysis is running; the summary will fill in when done'],
+      'chapters.untitled': ['(未命名章节)', '(Untitled chapter)'],
+      'transcript.toggleOn': ['关闭双语对照', 'Turn off bilingual view'],
+      'transcript.toggleOff': ['显示原文与译文对照', 'Show original with translation'],
+      'transcript.followOff': ['关闭跟随播放高亮', 'Turn off follow-playback highlight'],
+      'transcript.followOn': ['开启跟随播放高亮', 'Turn on follow-playback highlight'],
+      'mindmap.emptyNode': ['（空节点）', '(empty node)'],
+      'storyboard.emptyTitle': ['这个视频还没有分镜。', 'No storyboard for this video yet.'],
+      'job.queuedLabel': ['排队中', 'Queued'],
+      'transcribe.title': ['这个视频没有字幕', 'This video has no captions'],
+      'transcribe.settings': ['转写设置', 'Transcription settings'],
+      'transcribe.goEnable': ['去设置里开启', 'Enable in settings'],
+      'transcribe.goCheck': ['去设置查看', 'Check settings'],
+
+    };
+
+    /** 取当前界面语言下的文案，`{name}` 会被 params 替换。 */
+    function t(key, params) {
+      const entry = STRINGS[key];
+      // 每条文案是 [中文, English] 两元数组，按当前语言取下标。
+      const index = activeUiLang === 'en' ? 1 : 0;
+      let text = entry ? (entry[index] ?? entry[0] ?? '') : String(key);
+      if (params) {
+        text = text.replace(/\{([\w.]+)\}/g, (match, name) => (params[name] === undefined || params[name] === null ? match : String(params[name])));
+      }
+      return text;
+    }
+    function setActiveUiLang(lang) { activeUiLang = lang === 'en' ? 'en' : 'zh'; }
+    function readLangSetting() {
+      try {
+        const value = String(localStorage.getItem(LANG_KEY) || '');
+        return value === 'zh' || value === 'en' ? value : 'auto';
+      } catch { return 'auto'; }
+    }
+    function writeLangSetting(value) {
+      try { localStorage.setItem(LANG_KEY, String(value === 'zh' || value === 'en' ? value : 'auto')); } catch { /* ignore */ }
+    }
+    function dshLocaleActive() {
+      try { return String(localeService && typeof localeService.getLocale === 'function' ? (localeService.getLocale().active || '') : '').toLowerCase(); } catch { return ''; }
+    }
+    /** 界面语言：显式 zh/en 优先；auto 时 DSH 是 zh* → 中文，其它一律英文。 */
+    function uiLangFor(setting) {
+      const value = setting === 'zh' || setting === 'en' ? setting : 'auto';
+      if (value !== 'auto') return value;
+      const active = dshLocaleActive();
+      if (!active) return 'zh'; // 没有 DSH locale 服务时按中文兜底，避免误判成英文。
+      return active.startsWith('zh') ? 'zh' : 'en';
+    }
+    /** 产出文字的请求语言：auto 且 DSH 是 ja/es/fr/de/ru/pt 时传该语言，其余按界面语言。 */
+    function aiLangFor(setting) {
+      const value = setting === 'zh' || setting === 'en' ? setting : 'auto';
+      if (value !== 'auto') return value;
+      const active = dshLocaleActive();
+      if (!active) return 'zh';
+      const base = active.split('-')[0];
+      if (base === 'zh') return 'zh';
+      return AI_LANGS.indexOf(base) >= 0 ? base : 'en';
+    }
+    /** 优先用 code 的本地文案；没有对应映射时返回空串（调用方再退回 host message）。 */
+    function codeText(error) {
+      const code = String((error && error.code) || '');
+      if (!code) return '';
+      return STRINGS['error.' + code] ? t('error.' + code, { message: (error && error.message) || '' }) : '';
+    }
+
     const EMPTY_SUMMARY = { text: '', suggestions: [], loading: false, phase: '', error: '', done: false, cached: false, cachedAt: '' };
     const EMPTY_CHAPTERS = { loading: false, error: '', note: '', items: null, source: '', cachedAt: '' };
     const EMPTY_TRANSCRIBE = { loading: false, phase: '', percent: null, error: '' };
@@ -48,13 +370,13 @@ window.__ModuleLoader__.load({
     /** 大纲：host 按「思维导图一级节点 → 章节 → 均匀切分」给出，章节与关键画面共用同一份数据与画面描述缓存。 */
     const EMPTY_OUTLINE = { docId: '', loading: false, loaded: false, error: '', code: '', data: null, genLoading: false, genPhase: '', genPercent: null, genError: '' };
     const OUTLINE_SOURCE_LABEL = { mindmap: '按思维导图切分', chapters: '按视频章节切分', uniform: '按时长均匀切分' };
-    const OUTLINE_STAGE_LABEL = { download: '正在准备视频…', scan: '正在抽取画面…', frames: '正在抽取画面…', describe: '正在生成画面描述…', vision: '正在理解画面…', translate: '正在整理描述…' };
+    const OUTLINE_STAGE_LABEL = { download: '正在准备视频…', scan: '正在抽取画面…', frames: '正在抽取画面…', describe: t('chapters.genProgress'), vision: '正在理解画面…', translate: '正在整理描述…' };
     const STORYBOARD_STAGE_LABEL = { download: '正在下载视频…', scan: '正在扫描镜头…', frames: '正在抽取画面…' };
 
     /** 原文双语对照：host 按视频缓存翻译结果（GET 读缓存 / POST SSE 生成）。 */
     const EMPTY_TRANSLATION = { lang: '', loading: false, phase: '', percent: null, error: '', code: '', data: null, cached: false, createdAt: 0 };
     const TRANSLATE_LANGS = [['zh', '中文（zh）'], ['en', 'English（en）']];
-    const TRANSLATE_STAGE_LABEL = { translate: '正在翻译字幕…' };
+    const TRANSLATE_STAGE_LABEL = { translate: t('transcript.translating') };
 
     /* ------------------------------------------------------------------ 常量 */
 
@@ -75,7 +397,7 @@ window.__ModuleLoader__.load({
       zh: '中文', 'zh-cn': '中文', 'zh-hans': '中文', 'zh-tw': '繁體中文', 'zh-hant': '繁體中文',
       en: 'English', 'en-us': 'English', 'en-gb': 'English', ja: '日本語', ko: '한국어',
     };
-    const TABS = [['summary', '总结'], ['chapters', '章节'], ['transcript', '原文'], ['storyboard', '分镜'], ['mindmap', '思维导图']];
+    const TABS = ['summary', 'chapters', 'transcript', 'storyboard', 'mindmap'];
     /** 首页示例链接：点一下直接解析。 */
     const ASK_EXAMPLES = ['这个视频最核心的论点是什么？', '作者的观点有哪些可疑之处？', '用 5 句话讲给完全不懂的人听'];
 
@@ -348,6 +670,8 @@ window.__ModuleLoader__.load({
       if (code === 'not-found' || /not-found|not found|没有|找不到/i.test(message)) return '还没有这个视频的大纲：先重新解析一次视频，再来看章节和关键画面。';
       if (code === 'no-transcript') return '这个视频还没有字幕：先在「原文」里开启本地转写，生成字幕后就能切分大纲。';
       if (code === 'no-route' || code === 'llm-failed') return `生成画面描述失败：${message || '当前模型不可用'}，可以稍后重试。`;
+      const localized = codeText(error);
+      if (localized) return localized;
       return `大纲加载失败：${message || '未知错误'}`;
     }
 
@@ -454,7 +778,7 @@ window.__ModuleLoader__.load({
           const start = Number(item.start);
           return {
             start: Number.isFinite(start) && start >= 0 ? start : null,
-            title: String(item.title || '(未命名章节)'),
+            title: String(item.title || t('chapters.untitled')),
             gist: String(item.gist || ''),
           };
         });
@@ -489,6 +813,8 @@ window.__ModuleLoader__.load({
     }
 
     function friendlyResolveError(error, rawUrl) {
+      const localized = codeText(error);
+      if (localized) return localized;
       const code = String(error?.code ?? '');
       const platform = guessPlatform(rawUrl);
       const who = platform === 'bilibili' ? 'B 站' : platform === 'youtube' ? 'YouTube' : '平台';
@@ -510,6 +836,8 @@ window.__ModuleLoader__.load({
       return `解析失败：${message}`;
     }
     function friendlyStreamError(error, kind) {
+      const localized = codeText(error);
+      if (localized) return localized;
       const message = String(error?.message ?? error ?? '未知错误');
       if (/401|403|unauthorized|权限/i.test(message)) return `${kind}生成失败：模型或接口没有权限，检查 DSH 的模型配置（${message}）`;
       if (/超时|timeout/i.test(message)) return `${kind}生成失败：请求超时，稍后重试（${message}）`;
@@ -518,6 +846,8 @@ window.__ModuleLoader__.load({
 
     /** /transcribe 的错误码 → 用户能执行的中文提示（host 自带安装提示时原样透出）。 */
     function friendlyAsrError(error) {
+      const localized = codeText(error);
+      if (localized) return localized;
       const code = String(error?.code ?? '');
       const message = String(error?.message ?? error ?? '未知错误');
       if (code === 'asr-needs-ytdlp' || /yt-dlp[^\n]*(缺|没有|not found|ENOENT)/i.test(message)) {
@@ -756,7 +1086,7 @@ window.__ModuleLoader__.load({
         h('div', { key: 't', className: 'dvv-state-title' }, '出错了'),
         h('div', { key: 'n', className: 'dvv-state-note' }, String(text || '请求失败，请稍后重试。')),
         onRetry ? h('div', { key: 'a', className: 'dvv-actions' },
-          h('button', { type: 'button', className: 'dvv-btn', onClick: onRetry }, retryLabel || '重试')) : null,
+          h('button', { type: 'button', className: 'dvv-btn', onClick: onRetry }, retryLabel || t('common.retry'))) : null,
       ].filter(Boolean));
     }
 
@@ -770,29 +1100,29 @@ window.__ModuleLoader__.load({
         if (canSubmit) onSubmit();
       };
       return h('div', { className: 'dvv-home' }, [
-        statusError ? h('div', { key: 'host', className: 'dvv-error' }, `插件主机未就绪：${statusError}（面板要等 host 半启动后才能解析）`) : null,
+        statusError ? h('div', { key: 'host', className: 'dvv-error' }, t('home.hostError', { err: statusError })) : null,
         h('div', { key: 'hero', className: 'dvv-home-hero' }, [
           h('div', { key: 'head', className: 'dvv-home-head' }, [
             h('div', { key: 'text', className: 'dvv-home-headtext' }, [
-              h('h1', { key: 't', className: 'dvv-home-title' }, '视频解析'),
-              h('p', { key: 's', className: 'dvv-home-sub' }, '粘贴一条链接，30 秒看清一个视频值不值得看。'),
+              h('h1', { key: 't', className: 'dvv-home-title' }, t('app.title')),
+              h('p', { key: 's', className: 'dvv-home-sub' }, t('app.subtitle')),
             ]),
           ]),
           h('form', { key: 'form', className: 'dvv-home-form', onSubmit: submit }, [
             h('input', {
               key: 'i', className: 'dvv-home-input', type: 'text', value: url,
-              placeholder: '粘贴视频链接，例如 https://www.youtube.com/watch?v=... 或 https://www.bilibili.com/video/BV...',
-              'aria-label': '视频链接', spellCheck: false,
+              placeholder: t('home.placeholder'),
+              'aria-label': t('home.videoLink'), spellCheck: false,
               onChange: (event) => onUrl(event.target.value),
               onKeyDown: (event) => { if (event.key === 'Enter') submit(event); },
             }),
             h('button', {
               key: 'go', type: 'submit', className: 'dvv-btn dvv-home-btn', 'data-primary': 'true', disabled: !canSubmit,
-            }, busy ? '解析中…' : '解析'),
+            }, busy ? t('home.resolving') : t('home.resolve')),
           ]),
           !biliReady ? h('div', { key: 'cookie', className: 'dvv-home-hint' }, [
-            h('span', { key: 't' }, 'B 站 AI 字幕需要登录 Cookie：'),
-            h('button', { key: 'b', type: 'button', className: 'dvv-btn dvv-btn-mini', onClick: onGoSettings }, '去设置'),
+            h('span', { key: 't' }, t('home.cookieHint')),
+            h('button', { key: 'b', type: 'button', className: 'dvv-btn dvv-btn-mini', onClick: onGoSettings }, t('home.goSettings')),
           ]) : null,
         ]),
       ].filter(Boolean));
@@ -806,12 +1136,12 @@ window.__ModuleLoader__.load({
       return h('section', { className: 'dvv-player' }, [
         h('div', { key: 'bar', className: 'dvv-player-bar' }, [
           h(PlatformBadge, { key: 'p', platform: doc.platform, compact: true }),
-          h('span', { key: 't', className: 'dvv-player-title' }, collapsed ? '播放器已收起' : '播放器'),
+          h('span', { key: 't', className: 'dvv-player-title' }, collapsed ? t('player.collapsed') : t('player.title')),
           h('div', { key: 's', className: 'dvv-spacer' }),
           h('a', {
             key: 'open', className: 'dvv-btn dvv-link-btn', href: doc.url || '#', target: '_blank', rel: 'noreferrer noopener',
-          }, `在 ${meta.short} 打开`),
-          h('button', { key: 'toggle', type: 'button', className: 'dvv-btn', onClick: onToggle }, collapsed ? '展开播放器' : '收起播放器'),
+          }, t('player.open', { name: meta.short })),
+          h('button', { key: 'toggle', type: 'button', className: 'dvv-btn', onClick: onToggle }, collapsed ? t('player.expand') : t('player.collapse')),
         ]),
         collapsed ? null : h('div', { key: 'body', className: 'dvv-player-body' },
           src
@@ -820,7 +1150,7 @@ window.__ModuleLoader__.load({
                 ref: frameRef,
                 className: 'dvv-frame',
                 src,
-                title: String(doc.title || '视频播放器'),
+                title: String(doc.title || t('player.frameTitle')),
                 allowFullScreen: true,
                 allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen',
                 referrerPolicy: 'strict-origin-when-cross-origin',
@@ -829,8 +1159,8 @@ window.__ModuleLoader__.load({
                 onLoad: onLoaded,
               }))
             : h('div', { className: 'dvv-player-empty' }, [
-                h('div', { key: 't', className: 'dvv-player-empty-title' }, '当前环境无法内嵌播放器'),
-                h('div', { key: 'd', className: 'dvv-player-empty-note' }, `请用「在 ${meta.short} 打开」在新窗口播放。`),
+                h('div', { key: 't', className: 'dvv-player-empty-title' }, t('player.empty')),
+                h('div', { key: 'd', className: 'dvv-player-empty-note' }, t('player.emptyNote', { name: meta.short })),
               ])),
       ].filter(Boolean));
     }
@@ -850,9 +1180,9 @@ window.__ModuleLoader__.load({
         writeMetaCollapsed(next);
       };
       const stats = doc ? (doc.stats ?? {}) : {};
-      const statBits = [['播放', stats.views], ['点赞', stats.likes], ['评论', stats.comments]]
+      const statBits = [['stat.views', stats.views], ['stat.likes', stats.likes], ['stat.comments', stats.comments]]
         .filter(([, value]) => Number(value) > 0)
-        .map(([label, value], index) => h('span', { key: `s-${label}` }, `${index ? '· ' : ''}${label} ${fmtCount(value)}`));
+        .map(([key, value], index) => h('span', { key: `s-${key}` }, `${index ? '· ' : ''}${t(key)} ${fmtCount(value)}`));
       const closeMenu = () => setMenu('');
       const runAction = (kind) => { closeMenu(); if (kind === 'summary' && onRegenerate) onRegenerate('summary'); if (kind === 'mindmap' && onRegenerate) onRegenerate('mindmap'); if (kind === 'storyboard' && onRegenerate) onRegenerate('storyboard'); };
       const exportAction = (kind) => { closeMenu(); if (onExport) onExport(kind); };
@@ -863,21 +1193,21 @@ window.__ModuleLoader__.load({
           h('div', { key: 'left', className: 'dvv-toolbar-left' }, [
             canGoBack ? h('button', {
               key: 'back', type: 'button', className: 'dvv-btn dvv-back',
-              title: doc ? '返回首页' : '返回对话', 'aria-label': doc ? '返回首页' : '返回上一级',
+              title: doc ? t('toolbar.backHome') : t('toolbar.backUp'), 'aria-label': doc ? t('toolbar.backHome') : t('toolbar.backUp'),
               onClick: () => { if (onBack) onBack(); },
-            }, '← 返回') : null,
+            }, t('toolbar.back')) : null,
           doc ? h('div', { key: 'cover', className: 'dvv-toolbar-cover' }, h(CoverImage, { src: doc.cover, alt: doc.title })) : null,
           h('div', { key: 'main', className: 'dvv-toolbar-main' }, doc ? [
             h('a', {
               key: 'title', className: 'dvv-toolbar-title', href: doc.url || '#', target: '_blank',
               rel: 'noreferrer noopener', title: doc.title || '',
-            }, doc.title || '(无标题视频)'),
+            }, doc.title || t('toolbar.noTitle')),
             h('div', { key: 'sub', className: 'dvv-toolbar-sub' }, [
               h(PlatformBadge, { key: 'plat', platform: doc.platform, compact: true }),
               doc.author ? h('span', { key: 'author', className: 'dvv-toolbar-author' }, doc.author) : null,
             ].filter(Boolean)),
           ] : [
-            h('div', { key: 't', className: 'dvv-toolbar-title-plain' }, '视频解析'),
+            h('div', { key: 't', className: 'dvv-toolbar-title-plain' }, t('app.title')),
           ]),
           ]),
           h('div', { key: 'actions', className: 'dvv-toolbar-actions' }, [
@@ -885,9 +1215,9 @@ window.__ModuleLoader__.load({
               key: 'job', className: 'dvv-job-chip',
               title: `${jobStageText(job)} · ${jobPercent(job)}%`,
             }, [
-              h('span', { key: 't', className: 'dvv-job-chip-text' }, `后台解析 ${jobPercent(job)}% · ${jobStageText(job)}`),
+              h('span', { key: 't', className: 'dvv-job-chip-text' }, t('job.bg', { pct: jobPercent(job), stage: jobStageText(job) })),
               h('button', {
-                key: 'x', type: 'button', className: 'dvv-job-chip-x', title: '取消后台解析', 'aria-label': '取消后台解析',
+                key: 'x', type: 'button', className: 'dvv-job-chip-x', title: t('job.cancelBg'), 'aria-label': t('job.cancelBg'),
                 onClick: () => { if (onCancelJob) onCancelJob(job); },
               }, '×'),
             ]) : null,
@@ -896,11 +1226,11 @@ window.__ModuleLoader__.load({
                 key: 'b', type: 'button', className: 'dvv-btn', 'aria-haspopup': 'menu',
                 'data-open': menu === 'regen' ? 'true' : undefined,
                 onClick: () => setMenu(menu === 'regen' ? '' : 'regen'),
-              }, '重新生成 ▾'),
+              }, t('toolbar.regenerate')),
               menu === 'regen' ? menuList([
-                ['summary', '重新生成总结', () => runAction('summary')],
-                ['mindmap', '重新生成思维导图', () => runAction('mindmap')],
-                ['storyboard', '重新生成分镜', () => runAction('storyboard')],
+                ['summary', t('toolbar.regenSummary'), () => runAction('summary')],
+                ['mindmap', t('toolbar.regenMindmap'), () => runAction('mindmap')],
+                ['storyboard', t('toolbar.regenStoryboard'), () => runAction('storyboard')],
               ]) : null,
             ]) : null,
             doc && onExport ? h('div', { key: 'export', className: 'dvv-menu' }, [
@@ -908,25 +1238,25 @@ window.__ModuleLoader__.load({
                 key: 'b', type: 'button', className: 'dvv-btn', 'aria-haspopup': 'menu',
                 'data-open': menu === 'export' ? 'true' : undefined,
                 onClick: () => setMenu(menu === 'export' ? '' : 'export'),
-              }, '导出 ▾'),
+              }, t('toolbar.export')),
               menu === 'export' ? menuList([
-                ['md-copy', '复制 Markdown', () => exportAction('markdown')],
-                ['md-dl', '下载 .md', () => exportAction('download')],
-                ['full', '复制全文', () => exportAction('fulltext')],
+                ['md-copy', t('toolbar.copyMd'), () => exportAction('markdown')],
+                ['md-dl', t('toolbar.downloadMd'), () => exportAction('download')],
+                ['full', t('toolbar.copyFull'), () => exportAction('fulltext')],
               ]) : null,
             ]) : null,
-            h('button', { key: 'history', type: 'button', className: 'dvv-btn', onClick: onHistory }, historyCount ? `历史 ${historyCount}` : '历史'),
-            h('button', { key: 'settings', type: 'button', className: 'dvv-btn', onClick: onSettings }, '设置'),
+            h('button', { key: 'history', type: 'button', className: 'dvv-btn', onClick: onHistory }, historyCount ? t('toolbar.historyN', { n: historyCount }) : t('toolbar.history')),
+            h('button', { key: 'settings', type: 'button', className: 'dvv-btn', onClick: onSettings }, t('toolbar.settings')),
           ].filter(Boolean)),
         ]),
         doc ? h('div', { key: 'meta', className: 'dvv-meta', 'data-collapsed': metaCollapsed ? 'true' : 'false' }, [
           metaCollapsed
-            ? h('button', { key: 'expand', type: 'button', className: 'dvv-meta-toggle', onClick: toggleMeta }, '展开视频信息')
+            ? h('button', { key: 'expand', type: 'button', className: 'dvv-meta-toggle', onClick: toggleMeta }, t('toolbar.expandMeta'))
             : [
-                doc.duration ? h('span', { key: 'dur', className: 'dvv-dur' }, `时长 ${fmtTime(doc.duration)}`) : null,
+                doc.duration ? h('span', { key: 'dur', className: 'dvv-dur' }, t('meta.duration', { t: fmtTime(doc.duration) })) : null,
                 doc.publishedAt ? h('span', { key: 'when', className: 'dvv-note' }, fmtDate(doc.publishedAt)) : null,
                 statBits.length ? h('span', { key: 'stats', className: 'dvv-toolbar-stats' }, statBits) : null,
-                h('button', { key: 'toggle', type: 'button', className: 'dvv-meta-toggle', onClick: toggleMeta }, '收起视频信息'),
+                h('button', { key: 'toggle', type: 'button', className: 'dvv-meta-toggle', onClick: toggleMeta }, t('toolbar.collapseMeta')),
               ].filter(Boolean),
         ]) : null,
       ].filter(Boolean));
@@ -974,7 +1304,7 @@ window.__ModuleLoader__.load({
       const local = source.startsWith('local-');
       if (available) {
         const parts = [
-          h('span', { key: 'k', className: 'dvv-note' }, '字幕'),
+          h('span', { key: 'k', className: 'dvv-note' }, t('common.subtitle')),
           h('span', { key: 's0', className: 'dvv-meta-sep' }, '·'),
         ];
         if (local) parts.push(h(LocalBadge, { key: 'badge', source }));
@@ -990,34 +1320,34 @@ window.__ModuleLoader__.load({
       const ready = Boolean(asr && asr.ready !== false);
       const hints = asr && Array.isArray(asr.hints) ? asr.hints.filter(Boolean) : [];
       const parts = [];
-      parts.push(h('div', { key: 'title', className: 'dvv-asr-note-title' }, '这个视频没有字幕'));
+      parts.push(h('div', { key: 'title', className: 'dvv-asr-note-title' }, t('transcribe.title')));
       parts.push(h('div', { key: 'desc', className: 'dvv-note' }, warnings[0]
         ? `${warnings[0]}。可以在这台电脑上本地转写（音频不会上传），或先看简介做分析。`
-        : '可以在这台电脑上本地转写：音频只在本机处理、不会上传，文字稿会用于总结、章节与追问。'));
+        : t('transcribe.note')));
       if (transcribe && transcribe.loading) {
         parts.push(h('div', { key: 'phase', className: 'dvv-asr-phase' }, [
           h('span', { key: 's', className: 'dvv-spinner' }),
-          transcribe.phase || '准备转写…',
+          transcribe.phase || t('transcribe.phase'),
         ]));
         parts.push(h(AsrProgress, { key: 'bar', percent: transcribe.percent }));
         parts.push(h('div', { key: 'actions', className: 'dvv-actions' },
-          h('button', { key: 'cancel', type: 'button', className: 'dvv-btn', onClick: onCancel }, '取消')));
+          h('button', { key: 'cancel', type: 'button', className: 'dvv-btn', onClick: onCancel }, t('common.cancel'))));
       } else {
         if (transcribe && transcribe.error) parts.push(h('div', { key: 'error', className: 'dvv-error' }, transcribe.error));
         const actions = [];
         if (!asr) {
-          actions.push(h('button', { key: 'go', type: 'button', className: 'dvv-btn', onClick: onGoSettings }, '转写设置'));
+          actions.push(h('button', { key: 'go', type: 'button', className: 'dvv-btn', onClick: onGoSettings }, t('transcribe.settings')));
         } else if (!enabled) {
-          parts.push(h('div', { key: 'off', className: 'dvv-note' }, '本地转写当前是关闭的：去「设置 → 本地语音转写」打开开关后，就能在本机生成字幕；也可以先用简介做分析。'));
-          actions.push(h('button', { key: 'go', type: 'button', className: 'dvv-btn', onClick: onGoSettings }, '去设置里开启'));
+          parts.push(h('div', { key: 'off', className: 'dvv-note' }, t('transcribe.offNote')));
+          actions.push(h('button', { key: 'go', type: 'button', className: 'dvv-btn', onClick: onGoSettings }, t('transcribe.goEnable')));
         } else if (!ready) {
-          parts.push(h('div', { key: 'miss', className: 'dvv-note' }, `本机转写组件还没装好：${hints[0] || '缺少 ffmpeg / whisper / sherpa 之一'}`));
-          actions.push(h('button', { key: 'go', type: 'button', className: 'dvv-btn', onClick: onGoSettings }, '去设置查看'));
+          parts.push(h('div', { key: 'miss', className: 'dvv-note' }, t('transcribe.missing', { hint: hints[0] || 'ffmpeg / whisper / sherpa' })));
+          actions.push(h('button', { key: 'go', type: 'button', className: 'dvv-btn', onClick: onGoSettings }, t('transcribe.goCheck')));
         } else {
           actions.push(h('button', {
             key: 'go', type: 'button', className: 'dvv-btn', 'data-primary': 'true',
             onClick: () => onTranscribe(),
-          }, transcribe && transcribe.error ? '重试转写' : (local ? '重新转写' : '本地转写')));
+          }, transcribe && transcribe.error ? t('transcribe.retry') : (local ? t('transcribe.again') : t('transcribe.start'))));
         }
         if (actions.length) parts.push(h('div', { key: 'actions', className: 'dvv-actions' }, actions));
       }
@@ -1044,13 +1374,24 @@ window.__ModuleLoader__.load({
         }
       }
       if (current) sections.push(current);
-      return sections
+      const mapped = sections
         .map((section) => ({ title: section.title, body: section.lines.join('\n').trim() }))
         .filter((section) => section.title || section.body);
+      // 只有标题命中当前语言的小节名才卡片化；否则退回纯 Markdown（不报错）。
+      const titles = summaryTitles();
+      const known = [].concat(titles.big, titles.small, titles.folded).map((name) => String(name).toLowerCase());
+      const matched = mapped.some((section) => section.title && known.some((name) => section.title.toLowerCase().indexOf(name) >= 0));
+      if (matched) return mapped;
+      // 没有小节标题的单段总结：整段当主卡，避免卡片化后内容丢失。
+      if (mapped.length === 1 && !mapped[0].title) return mapped;
+      return [];
     }
 
-    const SUMMARY_SMALL_SECTIONS = ['核心观点', '适合谁看', '值得记住的说法'];
-    const SUMMARY_FOLDED_SECTIONS = ['内容脉络', '关键要点'];
+    const SUMMARY_SECTIONS = {
+      zh: { big: ['一句话总结', '总结', '结论'], small: ['核心观点', '适合谁看', '值得记住的说法'], folded: ['内容脉络', '关键要点'] },
+      en: { big: ['One-sentence summary', 'Summary'], small: ['Key points', 'Who should watch', 'Memorable quotes'], folded: ['Outline', 'Key takeaways'] },
+    };
+    function summaryTitles() { return SUMMARY_SECTIONS[activeUiLang] || SUMMARY_SECTIONS.zh; }
 
     /** 卡片化总结：一句话大卡 + 三张小卡 + 可折叠详读。没有 `##` 分段时由调用方回退。 */
     function SummaryCards({ text, onSeek }) {
@@ -1058,10 +1399,11 @@ window.__ModuleLoader__.load({
       const [expanded, setExpanded] = useState({});
       const [showAllSmall, setShowAllSmall] = useState(false);
       if (!sections.length) return null;
-      const matches = (names) => sections.filter((section) => names.some((name) => section.title.includes(name)));
-      const bigSection = sections.find((section) => /一句话|总结/.test(section.title)) || sections[0];
-      const smallSections = matches(SUMMARY_SMALL_SECTIONS);
-      const foldedSections = matches(SUMMARY_FOLDED_SECTIONS);
+      const titles = summaryTitles();
+      const matches = (names) => sections.filter((section) => names.some((name) => String(section.title || '').toLowerCase().indexOf(String(name).toLowerCase()) >= 0));
+      const bigSection = matches(titles.big)[0] || sections[0];
+      const smallSections = matches(titles.small);
+      const foldedSections = matches(titles.folded);
       const otherSections = sections.filter((section) => section !== bigSection
         && !smallSections.includes(section) && !foldedSections.includes(section));
       const body = (section) => h('div', { className: 'dvv-md dvv-sum-md' }, renderMarkdown(section.body, onSeek));
@@ -1079,25 +1421,25 @@ window.__ModuleLoader__.load({
           const limited = !showAllSmall && lines.length > 6;
           const shown = limited ? lines.slice(0, 6).join('\n') : section.body;
           return h('div', { key: `s-${index}`, className: 'dvv-sum-card' }, [
-            h('div', { key: 't', className: 'dvv-sum-card-title' }, section.title || '要点'),
+            h('div', { key: 't', className: 'dvv-sum-card-title' }, section.title || t('summary.point')),
             h('div', { key: 'b', className: 'dvv-md' }, renderMarkdown(shown, onSeek)),
             limited ? h('button', {
               key: 'more', type: 'button', className: 'dvv-btn dvv-btn-mini',
               onClick: () => setShowAllSmall(true),
-            }, '展开更多') : null,
+            }, t('summary.more')) : null,
           ].filter(Boolean));
         })));
       }
       for (const section of [...foldedSections, ...otherSections]) {
         const key = section.title || '其他';
-        const defaultOpen = section.title.includes('内容脉络');
+        const defaultOpen = String(section.title || '').toLowerCase().indexOf(String(titles.folded[0] || '').toLowerCase()) >= 0;
         const open = isOpen(key, defaultOpen);
         parts.push(h('div', { key: `f-${key}`, className: 'dvv-sum-fold', 'data-open': open ? 'true' : 'false' }, [
           h('button', {
             key: 'h', type: 'button', className: 'dvv-sum-fold-head', onClick: () => toggle(key, defaultOpen),
           }, [
             h('span', { key: 't', className: 'dvv-sum-fold-title' }, key),
-            h('span', { key: 'x', className: 'dvv-sum-fold-arrow' }, open ? '收起' : '展开'),
+            h('span', { key: 'x', className: 'dvv-sum-fold-arrow' }, open ? t('common.collapse') : t('common.expand')),
           ]),
           open ? body(section) : null,
         ].filter(Boolean)));
@@ -1113,34 +1455,34 @@ window.__ModuleLoader__.load({
       const parts = [];
       if (!available) {
         parts.push(h('div', { key: 'cap', className: 'dvv-notice' }, [
-          h('div', { key: 't', className: 'dvv-notice-title' }, '这个视频没拿到字幕'),
+          h('div', { key: 't', className: 'dvv-notice-title' }, t('summary.noCapTitle')),
           h('div', { key: 'd', className: 'dvv-note' }, doc && doc.platform === 'bilibili'
-            ? 'B 站需要登录 Cookie 才能读取 AI 字幕与官方总结。去「设置」粘贴 SESSDATA 后重新解析这个链接即可。'
-            : 'YouTube 视频可能本身没有字幕，或作者关闭了自动字幕。'),
+            ? t('summary.noCapBili')
+            : t('summary.noCapYt')),
           h('div', { key: 'a', className: 'dvv-actions' }, h('button', { type: 'button', className: 'dvv-btn', 'data-primary': 'true', onClick: onGoSettings }, '去设置')),
         ]));
         if (official) {
           parts.push(h('div', { key: 'official', className: 'dvv-official' }, [
-            h('div', { key: 'l', className: 'dvv-label' }, 'B 站官方 AI 摘要'),
+            h('div', { key: 'l', className: 'dvv-label' }, t('summary.official')),
             h('div', { key: 't', className: 'dvv-md' }, renderMarkdown(official, onSeek)),
           ]));
         }
         return h('div', { className: 'dvv-tabpane' }, parts);
       }
       if (summary.cached && summary.cachedAt) {
-        parts.push(h('div', { key: 'cached', className: 'dvv-cache-note dvv-note' }, `已缓存 · ${fmtRelative(summary.cachedAt)}（点「重新生成」可覆盖）`));
+        parts.push(h('div', { key: 'cached', className: 'dvv-cache-note dvv-note' }, t('common.cached', { when: fmtRelative(summary.cachedAt) })));
       }
       if (summary.error) parts.push(h('div', { key: 'err', className: 'dvv-error' }, summary.error));
       const bgActive = Boolean(job && jobActive(job));
       if (bgActive && !summary.loading && !summary.text && !summary.error) {
         parts.push(h('div', { key: 'bg', className: 'dvv-loading-block dvv-bg-block' }, [
           h('span', { key: 's', className: 'dvv-spinner' }),
-          h('span', { key: 't' }, `后台解析中 ${jobPercent(job)}% · ${jobStageText(job)}`),
-          h('span', { key: 'n', className: 'dvv-note' }, '总结、章节、思维导图与分镜会在后台生成，完成后自动回填。'),
+          h('span', { key: 't' }, t('summary.bg', { pct: jobPercent(job), stage: jobStageText(job) })),
+          h('span', { key: 'n', className: 'dvv-note' }, t('summary.bgNote')),
         ]));
       }
       if (summary.loading && !summary.text) {
-        parts.push(h(Skeleton, { key: 'loading', rows: 6, note: summary.phase || '正在生成总结…' }));
+        parts.push(h(Skeleton, { key: 'loading', rows: 6, note: summary.phase || t('summary.generating') }));
       }
       if (summary.text) {
         const sections = parseSummarySections(summary.text);
@@ -1154,29 +1496,29 @@ window.__ModuleLoader__.load({
       }
       if (summary.loading && summary.text && summary.phase) parts.push(h('div', { key: 'phase', className: 'dvv-note' }, summary.phase));
       const actions = [];
-      if (summary.loading) actions.push(h('button', { key: 'stop', type: 'button', className: 'dvv-btn', onClick: onStop }, '停止'));
+      if (summary.loading) actions.push(h('button', { key: 'stop', type: 'button', className: 'dvv-btn', onClick: onStop }, t('common.stop')));
       else {
-        if (summary.text || summary.error) actions.push(h('button', { key: 'again', type: 'button', className: 'dvv-btn', onClick: onRun }, '重新生成'));
-        if (summary.text) actions.push(h('button', { key: 'copy', type: 'button', className: 'dvv-btn', onClick: onCopy }, '复制'));
+        if (summary.text || summary.error) actions.push(h('button', { key: 'again', type: 'button', className: 'dvv-btn', onClick: onRun }, t('common.regenerate')));
+        if (summary.text) actions.push(h('button', { key: 'copy', type: 'button', className: 'dvv-btn', onClick: onCopy }, t('common.copy')));
       }
       const canExport = Boolean(summary.text);
-      const exportHint = canExport ? '' : '先生成总结';
+      const exportHint = canExport ? '' : t('summary.exportHint');
       actions.push(h('span', { key: 'spacer', className: 'dvv-actions-spacer' }));
       actions.push(h('button', {
         key: 'md-copy', type: 'button', className: 'dvv-btn', 'data-export': 'copy',
-        disabled: !canExport, title: canExport ? '复制完整笔记为 Markdown（含标题、来源与章节）' : exportHint,
+        disabled: !canExport, title: canExport ? t('summary.copyMdTitle') : exportHint,
         onClick: onCopyMarkdown,
-      }, '复制 Markdown'));
+      }, t('summary.copyMd')));
       actions.push(h('button', {
         key: 'md-download', type: 'button', className: 'dvv-btn', 'data-export': 'download',
-        disabled: !canExport, title: canExport ? '下载为 .md 文件' : exportHint,
+        disabled: !canExport, title: canExport ? t('summary.downloadTitle') : exportHint,
         onClick: onDownloadMarkdown,
-      }, '下载 .md'));
+      }, t('summary.download')));
       parts.push(h('div', { key: 'actions', className: 'dvv-actions' }, actions));
       if (!summary.loading && !summary.text && !summary.error && !bgActive) {
         parts.push(h('div', { key: 'idle', className: 'dvv-notice' }, [
-          h('div', { key: 'n', className: 'dvv-note' }, '还没有生成总结。'),
-          h('div', { key: 'a', className: 'dvv-actions' }, h('button', { type: 'button', className: 'dvv-btn', 'data-primary': 'true', onClick: onRun }, '生成总结')),
+          h('div', { key: 'n', className: 'dvv-note' }, t('summary.none')),
+          h('div', { key: 'a', className: 'dvv-actions' }, h('button', { type: 'button', className: 'dvv-btn', 'data-primary': 'true', onClick: onRun }, t('summary.generate'))),
         ]));
       }
       return h('div', { className: 'dvv-tabpane' }, parts);
@@ -1206,7 +1548,7 @@ window.__ModuleLoader__.load({
         h('div', { key: 'main', className: 'dvv-ch-main' }, [
           h('div', { key: 'top', className: 'dvv-ch-top' }, [
             h('span', { key: 'ts', className: 'dvv-ts' }, start !== null ? `[${fmtTime(start)}]` : `P${index + 1}`),
-            h('span', { key: 'title', className: 'dvv-ch-title' }, item.title || '(未命名章节)'),
+            h('span', { key: 'title', className: 'dvv-ch-title' }, item.title || t('chapters.untitled')),
           ]),
           detail.length ? h('div', { key: 'gist', className: 'dvv-ch-gist' }, detail[0]) : null,
           item.description ? h('div', { key: 'desc', className: 'dvv-ch-desc', title: item.description }, item.description) : null,
@@ -1215,9 +1557,9 @@ window.__ModuleLoader__.load({
     }
 
     function ChaptersTab({ outline, doc, currentSeconds, view, onView, onSeek, onRetry, onGenerate, onCancel, hint, titlesBusy, onGenerateTitles, onGoMindmap }) {
-      if (!doc) return h('div', { className: 'dvv-tabpane' }, h(EmptyState, { title: '先解析一个视频，再来看章节。', note: '在首页粘贴链接，解析完成后这里会列出章节。' }));
+      if (!doc) return h('div', { className: 'dvv-tabpane' }, h(EmptyState, { title: t('chapters.noDoc'), note: t('chapters.noDocNote') }));
       if (outline.loading) {
-        return h('div', { className: 'dvv-tabpane' }, h(Skeleton, { rows: 4, note: '正在读取章节…' }));
+        return h('div', { className: 'dvv-tabpane' }, h(Skeleton, { rows: 4, note: t('chapters.loading') }));
       }
       const data = outline.data && typeof outline.data === 'object' ? outline.data : {};
       const items = Array.isArray(data.items) ? data.items.filter(Boolean) : [];
@@ -1235,13 +1577,13 @@ window.__ModuleLoader__.load({
         h('span', { key: 'src', className: 'dvv-badge' }, OUTLINE_SOURCE_LABEL[data.source] || OUTLINE_SOURCE_LABEL.uniform),
         visuals ? h('span', { key: 'cached', className: 'dvv-mini' }, `已缓存 · ${fmtRelative(visuals.generatedAt)}`) : null,
         h('span', { key: 'view', className: 'dvv-ch-view' }, [
-          h('button', { key: 'list', type: 'button', className: 'dvv-btn', 'data-active': view !== 'grid' ? 'true' : 'false', onClick: () => onView('list') }, '列表'),
-          h('button', { key: 'grid', type: 'button', className: 'dvv-btn', 'data-active': view === 'grid' ? 'true' : 'false', onClick: () => onView('grid') }, '网格'),
+          h('button', { key: 'list', type: 'button', className: 'dvv-btn', 'data-active': view !== 'grid' ? 'true' : 'false', onClick: () => onView('list') }, t('chapters.list')),
+          h('button', { key: 'grid', type: 'button', className: 'dvv-btn', 'data-active': view === 'grid' ? 'true' : 'false', onClick: () => onView('grid') }, t('chapters.grid')),
         ]),
         h('span', { key: 'sp', className: 'dvv-spacer' }),
         items.length ? h('span', { key: 'n', className: 'dvv-mini' }, `${items.length} 节`) : null,
         h('button', { key: 'gen', type: 'button', className: 'dvv-btn', disabled: outline.genLoading, onClick: onGenerate },
-          outline.genLoading ? '生成中…' : visuals ? '重新生成描述' : '生成画面描述'),
+          outline.genLoading ? t('ask.sending') : visuals ? t('chapters.regenDesc') : t('chapters.genDesc')),
       ].filter(Boolean));
       const parts = [bar];
       const hintText = String(hint || '').trim();
@@ -1252,19 +1594,19 @@ window.__ModuleLoader__.load({
             h('button', {
               key: 'gen', type: 'button', className: 'dvv-btn', 'data-primary': 'true',
               disabled: Boolean(titlesBusy), onClick: () => { if (typeof onGenerateTitles === 'function') onGenerateTitles(); },
-            }, titlesBusy ? '正在生成…' : '生成章节标题'),
+            }, titlesBusy ? t('chapters.titlesBusy') : t('chapters.genTitles')),
             h('button', {
               key: 'mm', type: 'button', className: 'dvv-btn',
               onClick: () => { if (typeof onGoMindmap === 'function') onGoMindmap(); },
-            }, '去思维导图'),
+            }, t('chapters.goMindmap')),
           ]),
         ]));
       }
       if (outline.genLoading) {
         parts.push(h('div', { key: 'load', className: 'dvv-tr-progress' }, [
-          h('span', { key: 'p', className: 'dvv-note' }, outline.genPhase || '正在生成画面描述…'),
+          h('span', { key: 'p', className: 'dvv-note' }, outline.genPhase || t('chapters.genProgress')),
           h(AsrProgress, { key: 'g', percent: outline.genPercent }),
-          h('button', { key: 'c', type: 'button', className: 'dvv-btn', onClick: onCancel }, '取消'),
+          h('button', { key: 'c', type: 'button', className: 'dvv-btn', onClick: onCancel }, t('common.cancel')),
         ]));
       }
       if (outline.genError) parts.push(h('div', { key: 'gerr', className: 'dvv-error' }, outline.genError));
@@ -1279,8 +1621,8 @@ window.__ModuleLoader__.load({
         }
       } else if (!outline.loading && !outline.error) {
         parts.push(h(EmptyState, {
-          key: 'empty', title: '还没有可用的章节',
-          note: '这个视频可能太短，或者还没有字幕可以切分。',
+          key: 'empty', title: t('chapters.none'),
+          note: t('chapters.noneNote'),
         }));
       }
       return h('div', { className: 'dvv-tabpane' }, parts);
@@ -1322,10 +1664,10 @@ window.__ModuleLoader__.load({
       }, [follow, currentIndex]);
       if (!hasTranscript(doc)) {
         return h('div', { className: 'dvv-tabpane' }, h(EmptyState, {
-          title: '这个视频没拿到字幕',
+          title: t('transcript.noCapTitle'),
           note: doc && doc.platform === 'bilibili'
-            ? 'B 站要登录 Cookie 才能读 AI 字幕。去「设置」里粘贴 SESSDATA，再重新解析。'
-            : 'YouTube 视频可能没有字幕，或作者关闭了自动字幕。',
+            ? t('transcript.noCapBili')
+            : t('transcript.noCapYt'),
           action: h('div', { className: 'dvv-actions' }, h('button', { type: 'button', className: 'dvv-btn', 'data-primary': 'true', onClick: onGoSettings }, '去设置')),
         }));
       }
@@ -1342,16 +1684,16 @@ window.__ModuleLoader__.load({
       const parts = [
         h('div', { key: 'bar', className: 'dvv-segbar' }, [
           h('input', {
-            key: 'q', className: 'dvv-search', value: query, placeholder: '在字幕里搜索关键词…', 'aria-label': '搜索字幕',
+            key: 'q', className: 'dvv-search', value: query, placeholder: t('transcript.search'), 'aria-label': t('transcript.searchAria'),
             onChange: (event) => onQuery(event.target.value),
           }),
           h('span', { key: 'count', className: 'dvv-note' }, `共 ${entries.length} 条${keyword ? ` / 全部 ${segments.length} 条` : ''}`),
           h('button', {
             key: 'tr', type: 'button', className: 'dvv-btn',
             'data-active': translateOn ? 'true' : undefined,
-            title: translateOn ? '关闭双语对照' : '显示原文与译文对照',
+            title: translateOn ? t('transcript.toggleOn') : t('transcript.toggleOff'),
             onClick: () => { if (typeof props.onToggleTranslate === 'function') props.onToggleTranslate(); },
-          }, '双语'),
+          }, t('transcript.bilingual')),
           translateOn ? h('select', {
             key: 'lang', className: 'dvv-select', value: targetLang, 'aria-label': '翻译目标语言',
             onChange: (event) => { if (typeof props.onTargetLang === 'function') props.onTargetLang(event.target.value); },
@@ -1359,22 +1701,22 @@ window.__ModuleLoader__.load({
           h('button', {
             key: 'follow', type: 'button', className: 'dvv-btn',
             'data-active': follow ? 'true' : undefined,
-            title: follow ? '关闭跟随播放高亮' : '开启跟随播放高亮',
+            title: follow ? t('transcript.followOff') : t('transcript.followOn'),
             onClick: () => { if (typeof props.onToggleFollow === 'function') props.onToggleFollow(); },
-          }, '跟随'),
-          h('button', { key: 'copy', type: 'button', className: 'dvv-btn', disabled: !entries.length, onClick: () => onCopyAll(shown) }, '复制全部'),
+          }, t('transcript.follow')),
+          h('button', { key: 'copy', type: 'button', className: 'dvv-btn', disabled: !entries.length, onClick: () => onCopyAll(shown) }, t('transcript.copyAll')),
         ].filter(Boolean)),
         translateOn && translateState.loading ? h('div', { key: 'trload', className: 'dvv-tr-progress' }, [
-          h('span', { key: 'p', className: 'dvv-note' }, translateState.phase || '正在翻译字幕…'),
+          h('span', { key: 'p', className: 'dvv-note' }, translateState.phase || t('transcript.translating')),
           h(AsrProgress, { key: 'g', percent: translateState.percent }),
-          h('button', { key: 'c', type: 'button', className: 'dvv-btn', onClick: () => { if (typeof props.onCancelTranslate === 'function') props.onCancelTranslate(); } }, '取消'),
+          h('button', { key: 'c', type: 'button', className: 'dvv-btn', onClick: () => { if (typeof props.onCancelTranslate === 'function') props.onCancelTranslate(); } }, t('common.cancel')),
         ]) : null,
         translateOn && translateState.error ? h('div', { key: 'trerr', className: 'dvv-error dvv-tr-error' }, [
           h('span', { key: 'e' }, translateState.error),
-          h('button', { key: 'r', type: 'button', className: 'dvv-btn', onClick: () => { if (typeof props.onRetryTranslate === 'function') props.onRetryTranslate(); } }, '重试'),
+          h('button', { key: 'r', type: 'button', className: 'dvv-btn', onClick: () => { if (typeof props.onRetryTranslate === 'function') props.onRetryTranslate(); } }, t('common.retry')),
         ]) : null,
-        !segments.length ? h('div', { key: 'empty', className: 'dvv-note' }, '这个视频的字幕是空的。') : null,
-        segments.length && !entries.length ? h('div', { key: 'nomatch', className: 'dvv-note' }, '没有匹配的字幕。') : null,
+        !segments.length ? h('div', { key: 'empty', className: 'dvv-note' }, t('transcript.empty')) : null,
+        segments.length && !entries.length ? h('div', { key: 'nomatch', className: 'dvv-note' }, t('transcript.noMatch')) : null,
         h('div', { key: 'list', className: 'dvv-segs' }, shown.map((entry) => {
           return h('button', {
             key: `seg-${entry.index}`, type: 'button', className: 'dvv-seg',
@@ -1410,11 +1752,11 @@ window.__ModuleLoader__.load({
       const aiSuggestions = Array.isArray(suggestions) ? suggestions.slice(0, 3) : [];
       if (!chat.length) {
         parts.push(h('div', { key: 'examples', className: 'dvv-examples' }, [
-          h('div', { key: 'l', className: 'dvv-note' }, '不知道问什么？从这三句开始：'),
+          h('div', { key: 'l', className: 'dvv-note' }, t('ask.examplesTitle')),
           ...ASK_EXAMPLES.map((example) => h('button', { key: example, type: 'button', className: 'dvv-example', onClick: () => onSend(example) }, example)),
           // 这三条是模型读完本视频总结后给出的，只对本期内容成立
           aiSuggestions.length
-            ? h('div', { key: 'ai-l', className: 'dvv-note dvv-note-ai' }, 'AI 看完这个视频，猜你可能想问：')
+            ? h('div', { key: 'ai-l', className: 'dvv-note dvv-note-ai' }, t('ask.aiSuggest'))
             : null,
           ...aiSuggestions.map((example) => h('button', {
             key: `ai-${example}`, type: 'button', className: 'dvv-example', 'data-ai': 'true',
@@ -1427,12 +1769,12 @@ window.__ModuleLoader__.load({
         const body = [];
         if (message.text) body.push(h('div', { key: 't', className: 'dvv-md' }, renderMarkdown(message.text, onSeek)));
         if (message.error) body.push(h('div', { key: 'e', className: 'dvv-note' }, message.error));
-        if (message.streaming && !message.text) body.push(h('span', { key: 'ph', className: 'dvv-note' }, message.phase || '正在思考…'));
+        if (message.streaming && !message.text) body.push(h('span', { key: 'ph', className: 'dvv-note' }, message.phase || t('ask.thinking')));
         if (message.streaming) body.push(h('span', { key: 'c', className: 'dvv-caret' }));
         const citations = Array.isArray(message.citations) ? message.citations : [];
         if (citations.length) {
           body.push(h('div', { key: 'cites', className: 'dvv-cites' }, [
-            h('span', { key: 'l', className: 'dvv-cites-label' }, '依据'),
+            h('span', { key: 'l', className: 'dvv-cites-label' }, t('ask.citations')),
             ...citations.map((citation, citeIndex) => h('button', {
               key: `c-${citeIndex}`, type: 'button', className: 'dvv-cite',
               title: citation.preview || `跳到 ${fmtTime(citation.start)}`,
@@ -1444,14 +1786,14 @@ window.__ModuleLoader__.load({
       })));
       return h('section', { className: 'dvv-chat-panel' }, [
         h('div', { key: 'head', className: 'dvv-chat-head' }, [
-          h('span', { key: 't', className: 'dvv-chat-head-title' }, '追问'),
-          h('span', { key: 'n', className: 'dvv-note' }, '基于当前视频的字幕回答'),
+          h('span', { key: 't', className: 'dvv-chat-head-title' }, t('ask.title')),
+          h('span', { key: 'n', className: 'dvv-note' }, t('ask.subtitle')),
         ]),
         h('div', { key: 'scroll', className: 'dvv-chat-scroll' }, parts),
         h('div', { key: 'composer', className: 'dvv-composer' }, [
           h('textarea', {
             key: 'input', className: 'dvv-textarea', value: input,
-            placeholder: '就这个视频继续追问，Enter 发送 / Shift+Enter 换行',
+            placeholder: t('ask.placeholder'),
             onChange: (event) => onInput(event.target.value),
             onKeyDown: (event) => {
               if (event.key !== 'Enter' || event.shiftKey) return;
@@ -1463,7 +1805,7 @@ window.__ModuleLoader__.load({
           h('button', {
             key: 'send', type: 'button', className: 'dvv-btn', 'data-primary': 'true',
             disabled: busy || !String(input).trim(), onClick: () => onSend(input),
-          }, busy ? '生成中…' : '发送'),
+          }, busy ? t('ask.sending') : t('ask.send')),
         ]),
       ]);
     }
@@ -1479,6 +1821,11 @@ window.__ModuleLoader__.load({
       if (code === 'no-transcript' || /no-transcript|没有字幕|无字幕|还没有字幕|transcript/i.test(message)) {
         return '这个视频还没有字幕或本地转写，先生成字幕再生成思维导图。';
       }
+      if (code === 'llm-failed' || code === 'no-route' || code === 'llm-empty' || code === 'bad-json') {
+        return `生成思维导图失败：${message}`;
+      }
+      const localized = codeText(error);
+      if (localized) return localized;
       return `生成思维导图失败：${message}`;
     }
 
@@ -1511,6 +1858,8 @@ window.__ModuleLoader__.load({
 
     /** 分镜错误：code → 用户能看懂的中文（缺工具时给出安装提示）。 */
     function friendlyStoryboardError(error) {
+      const localized = codeText(error);
+      if (localized) return localized;
       const code = String((error && error.code) || '');
       const message = String((error && error.message) || error || '未知错误');
       if (code === 'ocr-needs-ytdlp') return '生成分镜需要下载视频：请先执行 brew install yt-dlp，或去设置里检查本机组件。';
@@ -1536,6 +1885,8 @@ window.__ModuleLoader__.load({
 
     /** 翻译错误：code → 用户能看懂的中文。 */
     function friendlyTranslateError(error) {
+      const localized = codeText(error);
+      if (localized) return localized;
       const code = String((error && error.code) || '');
       const message = String((error && error.message) || error || '未知错误');
       if (code === 'no-transcript') return '这个视频还没有转写稿：先在设置里本地转写，或换一个带字幕的视频。';
@@ -1725,7 +2076,7 @@ window.__ModuleLoader__.load({
         },
         onClick: toggle,
       }, [
-        h('span', { key: 't', className: 'dvv-mm2-title' }, record.title || '（空节点）'),
+        h('span', { key: 't', className: 'dvv-mm2-title' }, record.title || t('mindmap.emptyNode')),
         time === null ? null : h('button', {
           key: 'time', type: 'button', className: 'dvv-mm-t',
           title: `跳到 ${timeLabel} 播放`, 'aria-label': `跳到 ${timeLabel} 播放`, onClick: seek,
@@ -1744,24 +2095,24 @@ window.__ModuleLoader__.load({
         : null;
       const zoomBy = (delta) => setZoom((current) => Math.min(1.6, Math.max(0.5, Math.round((current + delta) * 10) / 10)));
       const bar = h('div', { key: 'bar', className: 'dvv-mm-bar' }, [
-        h('span', { key: 't', className: 'dvv-mm-bar-title' }, '思维导图'),
+        h('span', { key: 't', className: 'dvv-mm-bar-title' }, t('mindmap.title')),
         h('div', { key: 's', className: 'dvv-spacer' }),
         h('button', { key: 'all', type: 'button', className: 'dvv-btn', disabled: !mindmap.data, onClick: onExpandAll }, '全部展开'),
         h('button', { key: 'none', type: 'button', className: 'dvv-btn', disabled: !mindmap.data, onClick: onCollapseAll }, '全部收起'),
-        h('button', { key: 'zout', type: 'button', className: 'dvv-btn', disabled: !layout, onClick: () => zoomBy(-0.1) }, '缩小'),
+        h('button', { key: 'zout', type: 'button', className: 'dvv-btn', disabled: !layout, onClick: () => zoomBy(-0.1) }, t('mindmap.zoomOut')),
         h('span', { key: 'z', className: 'dvv-mm-zoom' }, `${Math.round(zoom * 100)}%`),
-        h('button', { key: 'zin', type: 'button', className: 'dvv-btn', disabled: !layout, onClick: () => zoomBy(0.1) }, '放大'),
-        h('button', { key: 'again', type: 'button', className: 'dvv-btn', disabled: mindmap.loading, onClick: onRetry }, mindmap.loading ? '生成中…' : '重新生成'),
+        h('button', { key: 'zin', type: 'button', className: 'dvv-btn', disabled: !layout, onClick: () => zoomBy(0.1) }, t('mindmap.zoomIn')),
+        h('button', { key: 'again', type: 'button', className: 'dvv-btn', disabled: mindmap.loading, onClick: onRetry }, mindmap.loading ? t('ask.sending') : t('common.regenerate')),
       ]);
       let body;
       if (mindmap.loading) {
-        body = h(Skeleton, { key: 'loading', rows: 5, note: '正在生成思维导图…' });
+        body = h(Skeleton, { key: 'loading', rows: 5, note: t('mindmap.loading') });
       } else if (mindmap.error) {
         const canRetry = mindmap.code === 'no-transcript' && doc && !hasTranscript(doc);
         body = h(ErrorState, {
           key: 'error', text: mindmap.error,
           onRetry: canRetry ? onGoTranscript : onRetry,
-          retryLabel: canRetry ? '本地转写' : '重试',
+          retryLabel: canRetry ? '本地转写' : t('common.retry'),
         });
       } else if (!mindmap.data) {
         body = h(EmptyState, { key: 'empty', title: '还没有生成思维导图', note: '点「重新生成」开始生成。' });
@@ -1848,24 +2199,24 @@ window.__ModuleLoader__.load({
             key: 'input', type: 'checkbox', checked: Boolean(describe),
             onChange: (event) => onDescribe(event.target.checked),
           }),
-          '附画面描述',
+          t('storyboard.describe'),
         ]),
         data ? h('a', {
           key: 'big', className: 'dvv-btn dvv-link-btn',
           href: storyboardImageSrc(data, doc.docId, 0), target: '_blank', rel: 'noreferrer',
-        }, '打开大图') : null,
+        }, t('storyboard.openLarge')) : null,
         h('button', {
           key: 'generate', type: 'button', className: 'dvv-btn', disabled: loading,
           onClick: () => onGenerate(),
-        }, loading ? '生成中…' : (data ? '重新生成' : '生成分镜')),
+        }, loading ? t('ask.sending') : (data ? t('common.regenerate') : t('storyboard.gen'))),
       ].filter(Boolean));
       let body;
       if (loading) {
         body = h('div', { key: 'progress', className: 'dvv-sb-progress' }, [
           h(AsrProgress, { key: 'progress', percent: storyboard.percent }),
-          h(Skeleton, { key: 'skel', rows: 4, note: storyboard.phase || '正在生成分镜…' }),
+          h(Skeleton, { key: 'skel', rows: 4, note: storyboard.phase || t('storyboard.loadingGen') }),
           h('div', { key: 'actions', className: 'dvv-actions' },
-            h('button', { key: 'cancel', type: 'button', className: 'dvv-btn', onClick: onCancel }, '取消')),
+            h('button', { key: 'cancel', type: 'button', className: 'dvv-btn', onClick: onCancel }, t('common.cancel'))),
         ]);
       } else if (error) {
         body = h(ErrorState, { key: 'error', text: error, onRetry: () => onGenerate() });
@@ -1888,7 +2239,7 @@ window.__ModuleLoader__.load({
             broken
               ? h('div', { key: 'broken', className: 'dvv-sb-broken' }, [
                 h('div', { key: 'title', className: 'dvv-sb-broken-title' }, '分镜图加载失败'),
-                h('button', { key: 'retry', type: 'button', className: 'dvv-btn', onClick: () => onGenerate() }, '重新生成'),
+                h('button', { key: 'retry', type: 'button', className: 'dvv-btn', onClick: () => onGenerate() }, t('common.regenerate')),
               ])
               : h('div', { key: 'sb', className: 'dvv-sb' }, [
                 h('img', {
@@ -1961,14 +2312,14 @@ window.__ModuleLoader__.load({
       const queued = list.filter((job) => job && job.status === 'queued');
       const finished = Math.max(0, list.length - active.length);
       const top = running || queued[0] || active[0];
-      const stage = top && top.status === 'queued' ? '排队中' : jobStageText(top);
+      const stage = top && top.status === 'queued' ? t('job.queuedLabel') : jobStageText(top);
       const percent = top && top.status === 'running' ? ` ${jobPercent(top)}%` : '';
       return h('div', { className: 'dvv-jobbar-global', role: 'status' }, [
         h('span', { key: 'dot', className: 'dvv-jobbar-global-dot', 'aria-hidden': 'true' }),
         h('span', { key: 't', className: 'dvv-jobbar-global-text' }, `解析队列 ${finished}/${list.length}`),
         h('span', { key: 's', className: 'dvv-jobbar-global-stage' }, `· ${stage}${percent}`),
         h('div', { key: 'sp', className: 'dvv-spacer' }),
-        h('button', { key: 'open', type: 'button', className: 'dvv-btn dvv-btn-mini', onClick: onExpand }, '展开'),
+        h('button', { key: 'open', type: 'button', className: 'dvv-btn dvv-btn-mini', onClick: onExpand }, t('common.expand')),
       ].filter(Boolean));
     }
 
@@ -1994,13 +2345,13 @@ window.__ModuleLoader__.load({
         h('div', { key: 'actions', className: 'dvv-jd-actions' }, [
           jobActive(job) ? h('button', {
             key: 'cancel', type: 'button', className: 'dvv-btn dvv-btn-mini', onClick: () => onCancel(job),
-          }, '取消') : null,
+          }, t('common.cancel')) : null,
           job.status === 'failed' ? h('button', {
             key: 'retry', type: 'button', className: 'dvv-btn dvv-btn-mini', onClick: () => onRetry(job),
-          }, '重试') : null,
+          }, t('common.retry')) : null,
           job.status === 'done' ? h('button', {
             key: 'open', type: 'button', className: 'dvv-btn dvv-btn-mini', onClick: () => onOpen(job),
-          }, '打开') : null,
+          }, t('job.open')) : null,
         ].filter(Boolean)),
       ].filter(Boolean));
       const section = (key, title, items) => (items.length
@@ -2014,14 +2365,14 @@ window.__ModuleLoader__.load({
         onClick: (event) => { if (event && typeof event.stopPropagation === 'function') event.stopPropagation(); },
       }, [
         h('div', { key: 'head', className: 'dvv-drawer-head' }, [
-          h('div', { key: 't', className: 'dvv-drawer-title' }, '解析队列'),
+          h('div', { key: 't', className: 'dvv-drawer-title' }, t('job.queueTitle')),
           h('span', { key: 'n', className: 'dvv-note' }, `${running.length} 个进行中 · ${queued.length} 个排队`),
-          h('button', { key: 'close', type: 'button', className: 'dvv-btn', onClick: onClose }, '关闭'),
+          h('button', { key: 'close', type: 'button', className: 'dvv-btn', onClick: onClose }, t('common.close')),
         ]),
         h('div', { key: 'body', className: 'dvv-drawer-body' }, [
-          section('running', '运行中', running),
-          section('queued', '排队中', queued),
-          section('recent', '最近完成', recent),
+          section('running', t('job.running'), running),
+          section('queued', t('job.queuedLabel'), queued),
+          section('recent', t('job.recent'), recent),
           (!running.length && !queued.length && !recent.length)
             ? h('div', { key: 'empty', className: 'dvv-empty-note' }, '目前没有后台任务。在首页或历史里重新解析视频即可开始。')
             : null,
@@ -2030,7 +2381,7 @@ window.__ModuleLoader__.load({
           h('button', {
             key: 'clear', type: 'button', className: 'dvv-btn', disabled: !recent.length,
             onClick: onClearDone,
-          }, '清除已完成'),
+          }, t('job.clearDone')),
         ]),
       ]));
     }
@@ -2051,7 +2402,7 @@ window.__ModuleLoader__.load({
     function jobActive(job) { const status = String((job && job.status) || ''); return status === 'queued' || status === 'running'; }
     /** 百分比：夹在 0–100，排队中恒为 0。 */
     function jobPercent(job) { if (!job || job.status === 'queued') return 0; const value = Number(job.percent); if (!Number.isFinite(value)) return 0; return Math.min(100, Math.max(0, value)); }
-    /** 阶段文案：排队中 / host 的 stageLabel / 兜底。 */ function jobStageText(job) { if (!job) return ''; if (job.status === 'queued') return '排队中…'; return String(job.stageLabel || (job.status === 'done' ? '已完成' : '解析中…')); }
+    /** 阶段文案：排队中 / host 的 stageLabel / 兜底。 */ function jobStageText(job) { if (!job) return ''; if (job.status === 'queued') return t('job.queued'); return String(job.stageLabel || (job.status === 'done' ? t('job.done') : t('job.parsing'))); }
     /** 某个 docId 是否有在跑的后台任务（避免同时开内联 SSE 双跑）。 */
     function activeJobForDoc(list, docId) { if (!docId) return null; for (const job of Array.isArray(list) ? list : []) if (job && job.docId === docId && jobActive(job)) return job; return null; }
     /** 汇总成 docId → 最新一条任务 的 Map。 */
@@ -2089,7 +2440,7 @@ window.__ModuleLoader__.load({
               h('div', { key: 'fill', className: 'dvv-jobbar-fill', style: { width: `${jobPercent(job)}%` } })),
             h('span', { key: 'label', className: 'dvv-job-label' }, job.status === 'queued' ? '排队中…' : `${jobPercent(job)}% · ${jobStageText(job)}`),
             onCancelJob ? h('button', {
-              key: 'cancel', type: 'button', className: 'dvv-del', title: '取消后台解析', 'aria-label': '取消后台解析',
+              key: 'cancel', type: 'button', className: 'dvv-del', title: t('job.cancelBg'), 'aria-label': t('job.cancelBg'),
               onClick: (event) => {
                 if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
                 onCancelJob(job);
@@ -2155,7 +2506,7 @@ window.__ModuleLoader__.load({
             h('div', { key: 'fill', className: 'dvv-jobbar-fill', style: { width: `${jobPercent(job)}%` } })),
           h('span', { key: 'label', className: 'dvv-job-label' }, job.status === 'queued' ? '排队中…' : `${jobPercent(job)}% · ${jobStageText(job)}`),
           onCancelJob ? h('button', {
-            key: 'cancel', type: 'button', className: 'dvv-del', title: '取消后台解析', 'aria-label': '取消后台解析',
+            key: 'cancel', type: 'button', className: 'dvv-del', title: t('job.cancelBg'), 'aria-label': t('job.cancelBg'),
             onClick: (event) => { stop(event); onCancelJob(job); },
           }, '×') : null,
         ]) : (job && job.status === 'failed'
@@ -2253,7 +2604,7 @@ window.__ModuleLoader__.load({
         h('div', { key: 'head', className: 'dvv-drawer-head' }, [
           h('div', { key: 't', className: 'dvv-drawer-title' }, `历史记录${list.length ? ` · ${list.length}` : ''}`),
           h('span', { key: 'limit', className: 'dvv-note' }, `最多保留 ${HISTORY_LIMIT} 条`),
-          h('button', { key: 'close', type: 'button', className: 'dvv-btn', onClick: onClose }, '关闭'),
+          h('button', { key: 'close', type: 'button', className: 'dvv-btn', onClick: onClose }, t('common.close')),
         ]),
         h('div', { key: 'bar', className: 'dvv-hist-bar' }, [
           h('input', {
@@ -2291,7 +2642,7 @@ window.__ModuleLoader__.load({
             'data-danger': confirming ? 'true' : undefined,
             onClick: () => { if (!confirming) { setConfirming(true); return; } setConfirming(false); onClear(); },
           }, confirming ? '确认清空？' : '清空历史'),
-          confirming ? h('button', { key: 'cancel', type: 'button', className: 'dvv-btn', onClick: () => setConfirming(false) }, '取消') : null,
+          confirming ? h('button', { key: 'cancel', type: 'button', className: 'dvv-btn', onClick: () => setConfirming(false) }, t('common.cancel')) : null,
         ].filter(Boolean)),
       ]));
     }
@@ -2523,7 +2874,7 @@ window.__ModuleLoader__.load({
 
     /* -------------------------------------------------------------- 设置弹层 */
 
-    function SettingsModal({ status, cookie, saving, note, onCookie, onSave, onClear, onClose, onRefresh, asr, asrSaving, asrNote, asrError, onAsrConfig, doc, onClearAnalysis, onClearChat }) {
+    function SettingsModal({ status, cookie, saving, note, onCookie, onSave, onClear, onClose, onRefresh, asr, asrSaving, asrNote, asrError, onAsrConfig, doc, onClearAnalysis, onClearChat, lang, onLang }) {
       // 「清空本视频分析缓存」的二次确认只影响当前打开的视频。
       const [confirmCache, setConfirmCache] = useState(false);
       const model = status && status.model ? `${status.model.provider ?? '?'} · ${status.model.model ?? '?'}` : '未获取到（插件主机可能还没就绪）';
@@ -2532,16 +2883,24 @@ window.__ModuleLoader__.load({
         key: 'modal', className: 'dvv-modal', role: 'dialog', 'aria-modal': 'true', onClick: (event) => { if (event && typeof event.stopPropagation === 'function') event.stopPropagation(); },
       }, [
         h('div', { key: 'head', className: 'dvv-drawer-head' }, [
-          h('div', { key: 't', className: 'dvv-drawer-title' }, '设置'),
-          h('button', { key: 'refresh', type: 'button', className: 'dvv-btn', onClick: onRefresh }, '刷新状态'),
-          h('button', { key: 'close', type: 'button', className: 'dvv-btn', onClick: onClose }, '关闭'),
+          h('div', { key: 't', className: 'dvv-drawer-title' }, t('settings.title')),
+          h('button', { key: 'refresh', type: 'button', className: 'dvv-btn', onClick: onRefresh }, t('common.refresh')),
+          h('button', { key: 'close', type: 'button', className: 'dvv-btn', onClick: onClose }, t('common.close')),
         ]),
         h('div', { key: 'body', className: 'dvv-drawer-body' }, [
+          h('div', { key: 'lang', className: 'dvv-field' }, [
+            h('div', { key: 'l', className: 'dvv-label' }, t('settings.language')),
+            h('div', { key: 'opts', className: 'dvv-actions' }, LANG_OPTIONS.map(([value, key]) => h('button', {
+              key: value, type: 'button', className: 'dvv-btn',
+              'data-active': String(lang || 'auto') === value ? 'true' : undefined,
+              onClick: () => { if (typeof onLang === 'function') onLang(value); },
+            }, t(key)))),
+          ]),
           h('div', { key: 'status', className: 'dvv-status-box' }, [
-            h('div', { key: 'model', className: 'dvv-kv' }, [h('span', { key: 'l', className: 'dvv-label' }, '当前模型'), h('span', { key: 'v' }, model)]),
+            h('div', { key: 'model', className: 'dvv-kv' }, [h('span', { key: 'l', className: 'dvv-label' }, t('settings.model')), h('span', { key: 'v' }, model)]),
             h('div', { key: 'cookie', className: 'dvv-kv' }, [
-              h('span', { key: 'l', className: 'dvv-label' }, 'B 站 Cookie'),
-              h('span', { key: 'v' }, biliCookie ? '已配置' : '未配置'),
+              h('span', { key: 'l', className: 'dvv-label' }, t('settings.cookie')),
+              h('span', { key: 'v' }, biliCookie ? t('settings.cookieSet') : t('settings.cookieUnset')),
             ]),
             status && status.version ? h('div', { key: 'ver', className: 'dvv-note' }, `dsh-video v${status.version}`) : null,
           ].filter(Boolean)),
@@ -2557,12 +2916,12 @@ window.__ModuleLoader__.load({
             h('div', { key: 'h', className: 'dvv-note' }, 'B 站读 AI 字幕、官方总结需要登录态；YouTube 不需要 Cookie。凭证只写在本机 ~/.dsh/video-credentials.json（权限 600）。'),
           ]),
           h('div', { key: 'actions', className: 'dvv-actions' }, [
-            h('button', { key: 'save', type: 'button', className: 'dvv-btn', 'data-primary': 'true', disabled: saving, onClick: () => onSave(cookie) }, saving ? '保存中…' : '保存'),
-            h('button', { key: 'clear', type: 'button', className: 'dvv-btn', disabled: saving, onClick: () => onClear() }, '清除'),
+            h('button', { key: 'save', type: 'button', className: 'dvv-btn', 'data-primary': 'true', disabled: saving, onClick: () => onSave(cookie) }, saving ? t('common.saving') : t('common.save')),
+            h('button', { key: 'clear', type: 'button', className: 'dvv-btn', disabled: saving, onClick: () => onClear() }, t('common.clear')),
             note ? h('span', { key: 'note', className: 'dvv-note' }, note) : null,
           ].filter(Boolean)),
           h('div', { key: 'caps', className: 'dvv-caps' }, [
-            h('div', { key: 'label', className: 'dvv-label' }, '各平台字幕能力'),
+            h('div', { key: 'label', className: 'dvv-label' }, t('settings.caps')),
             h(CapabilityRow, { key: 'yt', name: 'YouTube', ok: Boolean(status && status.platforms && status.platforms.youtube !== false), text: '官方字幕 / 自动识别音轨，无需 Cookie 直接可读。' }),
             h(CapabilityRow, {
               key: 'bili', name: '哔哩哔哩', ok: biliCookie,
@@ -2571,15 +2930,15 @@ window.__ModuleLoader__.load({
           ]),
           doc ? h('div', { key: 'cache', className: 'dvv-cache-box' }, [
             h('div', { key: 'head', className: 'dvv-cache-head' }, [
-              h('span', { key: 'l', className: 'dvv-label' }, '本视频分析缓存'),
-              h('span', { key: 't', className: 'dvv-note' }, doc.analysis && doc.analysis.savedAt ? `已缓存 · ${fmtRelative(doc.analysis.savedAt)}` : '暂无缓存'),
+              h('span', { key: 'l', className: 'dvv-label' }, t('settings.cacheTitle')),
+              h('span', { key: 't', className: 'dvv-note' }, doc.analysis && doc.analysis.savedAt ? `已缓存 · ${fmtRelative(doc.analysis.savedAt)}` : t('settings.cacheNone')),
             ]),
             h('div', { key: 'id', className: 'dvv-mono' }, String(doc.docId || '')),
             h('div', { key: 'acts', className: 'dvv-actions' }, [
               h('button', {
                 key: 'chat', type: 'button', className: 'dvv-btn',
                 onClick: () => { setConfirmCache(false); onClearChat(doc); },
-              }, '清空对话'),
+              }, t('settings.clearChat')),
               h('button', {
                 key: 'all', type: 'button', className: 'dvv-btn',
                 'data-danger': confirmCache ? 'true' : undefined,
@@ -2588,8 +2947,8 @@ window.__ModuleLoader__.load({
                   setConfirmCache(false);
                   onClearAnalysis(doc);
                 },
-              }, confirmCache ? '确认清空？' : '清空本视频分析缓存'),
-              confirmCache ? h('button', { key: 'cancel', type: 'button', className: 'dvv-btn', onClick: () => setConfirmCache(false) }, '取消') : null,
+              }, confirmCache ? t('settings.confirmClear') : t('settings.clearCache')),
+              confirmCache ? h('button', { key: 'cancel', type: 'button', className: 'dvv-btn', onClick: () => setConfirmCache(false) }, t('common.cancel')) : null,
             ].filter(Boolean)),
             h('div', { key: 'hint', className: 'dvv-note' }, '只清 host 保存的总结 / 章节 / 导图 / 对话，不影响视频本身与字幕；清空后可以重新生成。'),
           ]) : null,
@@ -2605,6 +2964,8 @@ window.__ModuleLoader__.load({
 
     function VideoPanel() {
       const [status, setStatus] = useState(null);
+      const [langSetting, setLangSetting] = useState(readLangSetting);
+      const [, setLangTick] = useState(0);
       const [statusError, setStatusError] = useState('');
       const [url, setUrl] = useState('');
       const [doc, setDoc] = useState(null);
@@ -2666,6 +3027,9 @@ window.__ModuleLoader__.load({
       const autoAsrRef = useRef(new Map());
       /** 后台自动入队判重：docId → true（同一视频每轮只自动提交一次，回首页重置）。 */
       const autoQueueRef = useRef(new Set());
+      const langSettingRef = useRef(langSetting);
+      langSettingRef.current = langSetting;
+      const aiLang = () => aiLangFor(langSettingRef.current);
       /** 双语翻译请求的独立 AbortController（不打断总结 / 追问）。 */
       const translationAbort = useRef(null);
       /** 后台解析队列：上一轮 jobs（用于判断 running/queued → done/failed）与最近 active 数。 */
@@ -2674,6 +3038,7 @@ window.__ModuleLoader__.load({
       const jobsSeen = useRef(false);
       docRef.current = doc;
       chatRef.current = chat;
+      setActiveUiLang(uiLangFor(langSetting));
 
       /* ---- 通用：toast / 复制 / 状态 ---- */
 
@@ -2696,7 +3061,7 @@ window.__ModuleLoader__.load({
         const target = docRef.current;
         if (!target) return;
         const markdown = buildNoteMarkdown(target, { summary: summary.text, chapters: chapters.items });
-        if (!markdown.trim()) { showToast('先生成总结再复制'); return; }
+        if (!markdown.trim()) { showToast(t('toast.summaryFirstCopy')); return; }
         const ok = await copyText(markdown);
         showToast(ok ? `已复制 Markdown（${markdown.length} 字）` : '复制失败，请手动选择文本复制');
       }, [summary.text, chapters.items, showToast]);
@@ -2706,7 +3071,7 @@ window.__ModuleLoader__.load({
         const target = docRef.current;
         if (!target) return;
         const markdown = buildNoteMarkdown(target, { summary: summary.text, chapters: chapters.items });
-        if (!markdown.trim()) { showToast('先生成总结再下载'); return; }
+        if (!markdown.trim()) { showToast(t('toast.summaryFirstDownload')); return; }
         try {
           if (typeof Blob === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
             throw new Error('当前环境不支持下载文件');
@@ -2721,7 +3086,7 @@ window.__ModuleLoader__.load({
           anchor.click();
           document.body.removeChild(anchor);
           setTimeout(() => { try { URL.revokeObjectURL(objectUrl); } catch { /* ignore */ } }, 1000);
-          showToast('已下载 Markdown 文件');
+          showToast(t('toast.mdDownloaded'));
         } catch (caught) {
           showToast(`下载失败：${String(caught && caught.message ? caught.message : caught)}`);
         }
@@ -2796,12 +3161,12 @@ window.__ModuleLoader__.load({
 
       const removeHistory = useCallback(async (item) => {
         const docId = String((item && item.docId) || '');
-        if (!docId) { showToast('这条记录缺少 docId，无法删除'); return; }
+        if (!docId) { showToast(t('toast.noDocIdDelete')); return; }
         try {
           const value = await post('history/remove', { docId });
           if (!mounted.current) return;
           applyHistory(value);
-          showToast('已删除这条记录');
+          showToast(t('toast.historyDeleted'));
         } catch (caught) {
           if (mounted.current) showToast(`删除失败：${String(caught?.message ?? caught)}`);
         }
@@ -2812,7 +3177,7 @@ window.__ModuleLoader__.load({
           const value = await post('history/clear', {});
           if (!mounted.current) return;
           applyHistory(value);
-          showToast('历史已清空');
+          showToast(t('toast.historyCleared'));
         } catch (caught) {
           if (mounted.current) showToast(`清空失败：${String(caught?.message ?? caught)}`);
         }
@@ -2821,7 +3186,7 @@ window.__ModuleLoader__.load({
       /** 星标：POST /history/favorite，成功后用 host 返回的完整列表替换本地并提示。 */
       const toggleHistoryFavorite = useCallback(async (item) => {
         const docId = String((item && item.docId) || '');
-        if (!docId) { showToast('这条记录缺少 docId，无法收藏'); return; }
+        if (!docId) { showToast(t('toast.noDocIdFav')); return; }
         const favorite = !(item && item.favorite);
         try {
           const value = await post('history/favorite', { docId, favorite });
@@ -3017,7 +3382,7 @@ window.__ModuleLoader__.load({
           setAskInput('');
           setTab('summary');
           setDoc((current) => (current && current.docId === target.docId ? { ...current, analysis: null } : current));
-          showToast('已清空本视频的分析缓存');
+          showToast(t('toast.cacheCleared'));
         } catch (caught) {
           if (mounted.current) showToast(`清空失败：${String((caught && caught.message) || caught)}`);
         }
@@ -3036,7 +3401,7 @@ window.__ModuleLoader__.load({
           setDoc((current) => (current && current.docId === target.docId && current.analysis
             ? { ...current, analysis: { ...current.analysis, chat: [] } }
             : current));
-          showToast('已清空这个视频的对话记录');
+          showToast(t('toast.chatCleared'));
         } catch (caught) {
           if (mounted.current) showToast(`清空对话失败：${String((caught && caught.message) || caught)}`);
         }
@@ -3048,7 +3413,7 @@ window.__ModuleLoader__.load({
         const target = video ?? docRef.current;
         if (!target || !mounted.current) return;
         if (activeJobForDoc(jobsRef.current, target.docId)) {
-          showToast('后台解析中，完成后会自动回填总结');
+          showToast(t('toast.bgRunning'));
           return;
         }
         interruptActive();
@@ -3058,7 +3423,7 @@ window.__ModuleLoader__.load({
         const live = () => active.current && active.current.controller === controller && mounted.current;
         let finished = false;
         try {
-          await streamSSE('analyze', { docId: target.docId, url: target.url, mode: 'summary' }, {
+          await streamSSE('analyze', { docId: target.docId, url: target.url, mode: 'summary', lang: aiLang() }, {
             signal: controller.signal,
             onEvent: (event) => {
               if (!live()) return 'stop';
@@ -3107,7 +3472,7 @@ window.__ModuleLoader__.load({
         const docId = String(target.docId);
         setOutline((current) => ({ ...EMPTY_OUTLINE, docId, loading: true }));
         try {
-          const value = await call('outline', { docId });
+          const value = await call('outline', { docId, lang: aiLang() });
           if (!mounted.current || docRef.current !== target) return;
           setOutline({ ...EMPTY_OUTLINE, docId, loaded: true, data: value && typeof value === 'object' ? value : null });
         } catch (caught) {
@@ -3124,13 +3489,13 @@ window.__ModuleLoader__.load({
         const controller = new AbortController();
         active.current = { controller, kind: 'outline' };
         let finished = false;
-        setOutline((current) => ({ ...current, genLoading: true, genPhase: '正在生成画面描述…', genPercent: null, genError: '' }));
+        setOutline((current) => ({ ...current, genLoading: true, genPhase: t('chapters.genProgress'), genPercent: null, genError: '' }));
         try {
-          await streamSSE('outline/visuals', { docId, force: Boolean(force) }, {
+          await streamSSE('outline/visuals', { docId, force: Boolean(force), lang: aiLang() }, {
             signal: controller.signal,
             onEvent: (event) => {
               if (!mounted.current || docRef.current !== target) return 'stop';
-              if (event.type === 'phase') { setOutline((current) => ({ ...current, genPhase: String(event.text || '正在生成画面描述…') })); return undefined; }
+              if (event.type === 'phase') { setOutline((current) => ({ ...current, genPhase: String(event.text || t('chapters.genProgress')) })); return undefined; }
               if (event.type === 'progress') {
                 const raw = event.percent;
                 const percent = raw === null || raw === undefined || raw === '' ? null : Math.max(0, Math.min(100, Number(raw)));
@@ -3166,7 +3531,7 @@ window.__ModuleLoader__.load({
       const cancelVisuals = useCallback(() => {
         abortActive();
         setOutline((current) => ({ ...current, genLoading: false, genPhase: '', genPercent: null }));
-        showToast('已取消生成画面描述');
+        showToast(t('toast.visualsCancelled'));
       }, [abortActive, showToast]);
 
       /* ---- 本地语音转写：/transcribe SSE（无字幕视频用） ---- */
@@ -3241,7 +3606,7 @@ window.__ModuleLoader__.load({
         } catch (caught) {
           if (caught && caught.name === 'AbortError') {
             mark('cancelled');
-            if (live()) { setTranscribe(EMPTY_TRANSCRIBE); showToast('已取消本地转写'); }
+            if (live()) { setTranscribe(EMPTY_TRANSCRIBE); showToast(t('toast.transcribeCancelled')); }
             return;
           }
           if (live()) setTranscribe({ loading: false, phase: '', percent: null, error: friendlyAsrError(caught) });
@@ -3257,7 +3622,7 @@ window.__ModuleLoader__.load({
         if (video && video.docId) autoAsrRef.current.set(String(video.docId), 'cancelled');
         abortActive();
         setTranscribe(EMPTY_TRANSCRIBE);
-        showToast('已取消本地转写');
+        showToast(t('toast.transcribeCancelled'));
       }, [abortActive, showToast]);
 
       /* ---- 思维导图：GET /mindmap，可强制重新生成 ---- */
@@ -3267,7 +3632,7 @@ window.__ModuleLoader__.load({
         if (!target || !target.docId || !mounted.current) return;
         setMindmap((current) => ({ ...current, loading: true, error: '', code: '', cached: false, cachedAt: '' }));
         try {
-          const value = await call('mindmap', force ? { docId: target.docId, force: 1 } : { docId: target.docId });
+          const value = await call('mindmap', force ? { docId: target.docId, force: 1, lang: aiLang() } : { docId: target.docId, lang: aiLang() });
           if (!mounted.current) return;
           const data = value && value.mindmap && typeof value.mindmap === 'object' ? value.mindmap : null;
           setMindmap({
@@ -3337,7 +3702,7 @@ window.__ModuleLoader__.load({
         const controller = new AbortController();
         active.current = { controller, kind: 'storyboard' };
         const previous = storyboard.data;
-        setStoryboard({ data: previous, loading: true, phase: '正在读取分镜…', percent: null, error: '', code: '' });
+        setStoryboard({ data: previous, loading: true, phase: t('storyboard.loading'), percent: null, error: '', code: '' });
         const live = () => active.current && active.current.controller === controller && mounted.current;
         try {
           if (!opts.force) {
@@ -3353,10 +3718,11 @@ window.__ModuleLoader__.load({
               return;
             }
           }
-          setStoryboard((current) => ({ ...current, loading: true, phase: '正在生成分镜…', percent: null, error: '', code: '' }));
+          setStoryboard((current) => ({ ...current, loading: true, phase: t('storyboard.loadingGen'), percent: null, error: '', code: '' }));
           let finished = false;
           await streamSSE('storyboard', {
             docId: target.docId,
+            lang: aiLang(),
             url: target.url,
             force: Boolean(opts.force),
             describe: Boolean(opts.describe),
@@ -3366,7 +3732,7 @@ window.__ModuleLoader__.load({
               if (!live()) return 'stop';
               const type = event && event.type;
               if (type === 'phase') {
-                setStoryboard((current) => ({ ...current, phase: String(event.text || '正在生成分镜…') }));
+                setStoryboard((current) => ({ ...current, phase: String(event.text || t('storyboard.loadingGen')) }));
               } else if (type === 'progress') {
                 const stage = storyboardStageText(event.stage);
                 const raw = event.percent;
@@ -3435,7 +3801,7 @@ window.__ModuleLoader__.load({
       const cancelStoryboard = useCallback(() => {
         abortActive();
         setStoryboard((current) => ({ ...current, loading: false, phase: '', percent: null }));
-        showToast('已取消生成分镜');
+        showToast(t('toast.sbCancelled'));
       }, [abortActive, showToast]);
 
       /* ---- 后台解析队列：GET /jobs 轮询 + 取消 + 一键全部解析 ---- */
@@ -3479,7 +3845,7 @@ window.__ModuleLoader__.load({
         for (const job of finished) {
           if (!current || job.docId !== current.docId) continue;
           if (job.status === 'done') {
-            showToast('后台解析完成');
+            showToast(t('toast.parseDone'));
             void loadAnalysisCache(current);
             void loadOutline(current);
             void loadStoryboard(current, { silent: true });
@@ -3492,11 +3858,11 @@ window.__ModuleLoader__.load({
       /** 取消某个 docId 的后台任务（历史行 / 详情工具条共用）。 */
       const cancelJob = useCallback(async (jobOrDoc) => {
         const docId = String((jobOrDoc && jobOrDoc.docId) || jobOrDoc || '');
-        if (!docId) { showToast('这条任务缺少 docId，无法取消'); return; }
+        if (!docId) { showToast(t('toast.noDocIdCancel')); return; }
         try {
           await post('jobs/cancel', { docId });
           if (!mounted.current) return;
-          showToast('已取消后台解析');
+          showToast(t('toast.parseCancelled'));
           void refreshJobs();
         } catch (caught) {
           if (mounted.current) showToast(`取消失败：${String(caught?.message ?? caught)}`);
@@ -3506,11 +3872,11 @@ window.__ModuleLoader__.load({
       /** 任务抽屉「重试」：把失败的 docId 重新入队。 */
       const retryJob = useCallback(async (job) => {
         const docId = String((job && job.docId) || '');
-        if (!docId) { showToast('这条任务缺少 docId，无法重试'); return; }
+        if (!docId) { showToast(t('toast.noDocIdRetry')); return; }
         try {
           await post('jobs', { docId, describe: true });
           if (!mounted.current) return;
-          showToast('已重新加入解析队列');
+          showToast(t('toast.jobRequeued'));
           void refreshJobs();
         } catch (caught) {
           if (mounted.current) showToast(`重试失败：${String(caught?.message ?? caught)}`);
@@ -3522,7 +3888,7 @@ window.__ModuleLoader__.load({
         try {
           await post('jobs/clear', {});
           if (!mounted.current) return;
-          showToast('已清除已完成任务');
+          showToast(t('toast.jobsCleared'));
           void refreshJobs();
         } catch (caught) {
           if (mounted.current) showToast(`清除失败：${String(caught?.message ?? caught)}`);
@@ -3533,7 +3899,7 @@ window.__ModuleLoader__.load({
       const parseAllJobs = useCallback(async () => {
         if (parseAllBusy) return;
         if (!parseAllConfirm) {
-          if (!historyItems.length) { showToast('还没有历史记录可以解析'); return; }
+          if (!historyItems.length) { showToast(t('toast.noHistory')); return; }
           setParseAllConfirm(true);
           return;
         }
@@ -3578,7 +3944,7 @@ window.__ModuleLoader__.load({
           /* 缓存读取失败就继续走生成 */
         }
         if (!mounted.current || controller.signal.aborted) return;
-        setTranslation((current) => ({ ...current, loading: true, phase: '正在翻译字幕…', percent: null }));
+        setTranslation((current) => ({ ...current, loading: true, phase: t('transcript.translating'), percent: null }));
         let finished = false;
         try {
           await streamSSE('translate', {
@@ -3656,7 +4022,7 @@ window.__ModuleLoader__.load({
       const cancelTranslation = useCallback(() => {
         if (translationAbort.current) { try { translationAbort.current.abort(); } catch { /* ignore */ } translationAbort.current = null; }
         setTranslation((current) => ({ ...current, loading: false, phase: '', percent: null }));
-        showToast('已取消翻译');
+        showToast(t('toast.translateCancelled'));
       }, [showToast]);
 
       /* ---- 无字幕自动转写：asr 开启且 autoTranscribe 为真时自动跑一次（同一视频只触发一次） ---- */
@@ -3721,7 +4087,7 @@ window.__ModuleLoader__.load({
         let queued = false;
         let cachedSummary = false;
         try {
-          const video = await call('resolve', { url: text, force: options && options.force ? 1 : undefined }, { signal: controller.signal });
+          const video = await call('resolve', { url: text, force: options && options.force ? 1 : undefined, lang: aiLang() }, { signal: controller.signal });
           if (!mounted.current || (active.current && active.current.controller !== controller && active.current.kind === 'resolve')) return;
           if (!video || !video.docId) throw makeError('插件主机没有返回视频信息', 'internal');
           setDoc(video);
@@ -3795,7 +4161,7 @@ window.__ModuleLoader__.load({
         askBusyRef.current = true;
         setAskBusy(true);
         setAskInput('');
-        setChat((current) => [...current, { role: 'user', text: question }, { role: 'assistant', text: '', phase: '正在思考…', streaming: true }]);
+        setChat((current) => [...current, { role: 'user', text: question }, { role: 'assistant', text: '', phase: t('ask.thinking'), streaming: true }]);
         const live = () => active.current && active.current.controller === controller && mounted.current;
         const patchLast = (patch) => setChat((current) => {
           if (!current.length) return current;
@@ -3805,7 +4171,7 @@ window.__ModuleLoader__.load({
         });
         let finished = false;
         try {
-          await streamSSE('analyze', { docId: video.docId, url: video.url, mode: 'ask', question, history: prior }, {
+          await streamSSE('analyze', { docId: video.docId, url: video.url, mode: 'ask', question, history: prior, lang: aiLang() }, {
             signal: controller.signal,
             onEvent: (event) => {
               if (!live()) return 'stop';
@@ -3841,7 +4207,7 @@ window.__ModuleLoader__.load({
           });
           if (!finished && live()) patchLast({ streaming: false, phase: '', error: '连接中断了，回答没有生成完，请重试。' });
         } catch (caught) {
-          if (!(caught && caught.name === 'AbortError') && live()) patchLast({ streaming: false, phase: '', error: friendlyStreamError(caught, '追问') });
+          if (!(caught && caught.name === 'AbortError') && live()) patchLast({ streaming: false, phase: '', error: friendlyStreamError(caught, t('ask.title')) });
         } finally {
           if (active.current && active.current.controller === controller) active.current = null;
           askBusyRef.current = false;
@@ -3915,6 +4281,20 @@ window.__ModuleLoader__.load({
         };
       }, [overlay]);
 
+      // DSH 语言变化时重渲染：auto 模式下界面语言跟着切（订阅返回清理函数）。
+      useEffect(() => {
+        const service = localeService;
+        if (!service || typeof service.subscribe !== 'function') return undefined;
+        let off = null;
+        try { off = service.subscribe(() => setLangTick((value) => value + 1)); } catch { return undefined; }
+        return () => { if (typeof off === 'function') { try { off(); } catch { /* ignore */ } } };
+      }, []);
+
+      const changeLang = useCallback((value) => {
+        writeLangSetting(value);
+        setLangSetting(value);
+      }, []);
+
       /* ---------------------------------------------------------------- 渲染 */
 
       const openSettings = () => { setOverlay('settings'); setCookieNote(''); setAsrNote(''); void refreshAsr(); };
@@ -3930,7 +4310,7 @@ window.__ModuleLoader__.load({
 
       const copyAllSegments = (list) => {
         const items = list ?? [];
-        if (!items.length) { showToast('没有可复制的字幕'); return; }
+        if (!items.length) { showToast(t('toast.noSegments')); return; }
         const lines = [];
         for (const item of items) {
           const segment = item && item.segment ? item.segment : item;
@@ -4129,10 +4509,10 @@ window.__ModuleLoader__.load({
               onCancel: cancelTranscribe,
               onGoSettings: openSettings,
             }),
-            h('div', { key: 'tabs', className: 'dvv-tabbar' }, TABS.map(([id, label]) => h('button', {
+            h('div', { key: 'tabs', className: 'dvv-tabbar' }, TABS.map((id) => h('button', {
               key: id, type: 'button', className: 'dvv-tab', 'data-active': tab === id ? 'true' : undefined, onClick: () => setTab(id),
             }, [
-              h('span', { key: 'l', className: 'dvv-tab-label' }, label),
+              h('span', { key: 'l', className: 'dvv-tab-label' }, t('tab.' + id)),
               h('span', { key: 'd', className: 'dvv-tab-dot', 'data-state': tabDotState(id), 'aria-hidden': 'true' }),
             ]))),
             h('div', { key: 'pane', className: 'dvv-pane' }, tabBody),
@@ -4165,12 +4545,12 @@ window.__ModuleLoader__.load({
         doc ? h('div', { key: 'inputrow', className: 'dvv-inputrow' }, [
           h('input', {
             key: 'input', className: 'dvv-input', value: url,
-            placeholder: '粘贴视频链接，例如 https://www.youtube.com/watch?v=... 或 https://www.bilibili.com/video/BV...',
-            'aria-label': '视频链接',
+            placeholder: t('home.placeholder'),
+            'aria-label': t('home.videoLink'),
             onChange: (event) => setUrl(event.target.value),
             onKeyDown: (event) => { if (event.key === 'Enter') { event.preventDefault(); void resolve(url); } },
           }),
-          h('button', { key: 'go', type: 'button', className: 'dvv-btn', 'data-primary': 'true', disabled: resolveBusy, onClick: () => { void resolve(url); } }, resolveBusy ? '解析中…' : '解析'),
+          h('button', { key: 'go', type: 'button', className: 'dvv-btn', 'data-primary': 'true', disabled: resolveBusy, onClick: () => { void resolve(url); } }, resolveBusy ? t('home.resolving') : t('home.resolve')),
         ]) : null,
         jobActiveCount > 0 ? h(GlobalJobbar, {
           key: 'jobbar', jobs: jobList, onExpand: () => setOverlay(overlay === 'jobs' ? '' : 'jobs'),
@@ -4211,7 +4591,7 @@ window.__ModuleLoader__.load({
           onRefresh: () => { void refreshStatus(); void refreshAsr(); },
           asr, asrSaving, asrNote, asrError,
           onAsrConfig: (patch) => { void submitAsrConfig(patch); },
-          doc,
+          doc, lang: langSetting, onLang: changeLang,
           onClearAnalysis: (video) => { void clearAnalysisCache(video); },
           onClearChat: (video) => { void clearChatCache(video); },
         }) : null,
@@ -4646,10 +5026,11 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
       }
     }
 
-    const inject = ['slots', 'layout'];
+    const inject = ['slots', 'layout', 'locale'];
 
     function apply(ctx) {
       pluginCtx = ctx;
+      try { localeService = (typeof ctx.get === 'function' && ctx.get('locale')) || null; } catch { localeService = null; }
       insertStyles();
       ctx.effect(() => {
         const disposers = [];

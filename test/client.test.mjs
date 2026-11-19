@@ -2157,6 +2157,83 @@ check('章节错误有重试按钮', Boolean(buttonByText(tree, '重试')));
 outlineMode = 'ok';
 
 
+
+/* ---------------------------------------------------------------- 多语言 i18n */
+
+// 回到首页 → 设置 → 语言区块
+clickText(tree, '返回');
+tree = await settle();
+clickText(tree, '设置');
+tree = await settle();
+checkIncludes('设置里有语言区块', nodeText(tree), '语言 / Language');
+check('语言选项有三个', Boolean(buttonByText(tree, 'English')) && Boolean(buttonByText(tree, '中文')) && Boolean(buttonByText(tree, '跟随 DSH')));
+
+clickText(tree, 'English');
+tree = await settle();
+check('切换英文后首页标题', nodeText(tree).includes('Video Insights'));
+check('语言写入 localStorage', sandbox.__store.get('dsh-video.lang') === 'en');
+
+const closeOk = clickText(tree, 'Close');
+tree = await settle();
+check('英文首页按钮与文案', nodeText(tree).includes('Analyze') && nodeText(tree).includes('Video Insights'));
+checkIncludes('英文输入框 placeholder', JSON.stringify(byClass(tree, 'dvv-home-input').props.placeholder), 'Paste a video link');
+
+// 英文界面下重新解析：resolve / analyze / outline / mindmap / storyboard 都带 lang
+change(byClass(tree, 'dvv-home-input'), BILI_DOC.url);
+tree = await settle();
+keydown(byClass(tree, 'dvv-home-input'), 'Enter');
+tree = await settle(60);
+const enResolve = callsOf('resolve').slice(-1)[0];
+check('英文下 resolve 带 lang=en', Boolean(enResolve) && enResolve.params && enResolve.params.lang === 'en');
+const enSummary = callsOf('analyze').filter((call) => call.body && call.body.mode === 'summary').slice(-1)[0];
+check('英文下 analyze 带 lang=en', Boolean(enSummary) && enSummary.body.lang === 'en');
+
+// 英文界面 + 中文小结标题：解析不到英文小节 → 回退纯 Markdown（不出现卡片）
+check('英文界面下中文小节不卡片化', !byClass(tree, 'dvv-sum-big') && Boolean(byClass(tree, 'dvv-md')));
+const pssEn = exports_.__test.parseSummarySections('## Key points\n- a\n\n## Outline\n- b');
+check('英文小节标题按 en 解析', pssEn.length === 2 && pssEn[0].title === 'Key points');
+
+// 英文总结：卡片化英文小节
+const EN_SUMMARY_EVENTS = [
+  { type: 'delta', text: '## One-sentence summary\n- 拆到最本质的问题\n\n## Key points\n- 第一点\n- 第二点\n\n## Outline\n- 开场\n- 结论' },
+  { type: 'done', text: '## One-sentence summary\n- 拆到最本质的问题\n\n## Key points\n- 第一点\n- 第二点\n\n## Outline\n- 开场\n- 结论', usage: {}, suggestions: [] },
+];
+const prevAnalyzeRoute = routes.analyze;
+routes.analyze = (call) => ({ __sse: call.body && call.body.mode === 'ask' ? ASK_EVENTS : EN_SUMMARY_EVENTS });
+clickText(tree, 'Regenerate');
+tree = await settle();
+check('英文下拉里有重新生成总结', Boolean(buttonByText(tree, 'Regenerate summary')));
+clickText(tree, 'Regenerate summary');
+tree = await settle(60);
+checkIncludes('英文总结渲染大卡', nodeText(tree), 'One-sentence summary');
+check('英文总结渲染卡片类', Boolean(byClass(tree, 'dvv-sum-big')) && Boolean(byClass(tree, 'dvv-sum-cards')));
+routes.analyze = prevAnalyzeRoute;
+
+// 章节 / 导图 / 分镜请求都带 lang
+clickText(tree, 'Chapters');
+tree = await settle(40);
+const enOutline = callsOf('outline').slice(-1)[0];
+check('英文下 outline 带 lang=en', Boolean(enOutline) && enOutline.params && enOutline.params.lang === 'en');
+clickText(tree, 'Mindmap');
+tree = await settle(40);
+const enMindmap = callsOf('mindmap').slice(-1)[0];
+check('英文下 mindmap 带 lang=en', Boolean(enMindmap) && enMindmap.params && enMindmap.params.lang === 'en');
+clickText(tree, 'Storyboard');
+tree = await settle(60);
+const enStoryboard = callsOf('storyboard').filter((call) => call.method === 'POST').slice(-1)[0];
+check('英文下 storyboard 带 lang=en', Boolean(enStoryboard) && enStoryboard.body && enStoryboard.body.lang === 'en');
+
+// 跟随 DSH（auto）：无 locale 服务时中文兜底
+clickText(tree, 'Settings');
+tree = await settle();
+const followOk = clickText(tree, 'Follow DSH');
+tree = await settle();
+check('切回 auto 后语言设置持久化', sandbox.__store.get('dsh-video.lang') === 'auto');
+if (!clickText(tree, 'Close')) clickText(tree, '关闭');
+tree = await settle();
+check('auto 且无 locale 时中文兜底', nodeText(tree).includes('重新生成') || nodeText(tree).includes('返回'));
+
+
 check('渲染期间没有运行时异常', runtimeErrors.length === 0);
 if (runtimeErrors.length) console.log(`运行时异常：\n${runtimeErrors.slice(0, 3).join('\n')}`);
 

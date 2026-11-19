@@ -2,6 +2,17 @@
 
 本项目的版本号与 `package.json` 保持一致；面板是单文件客户端，刷新页面即生效。
 
+## v0.11.0（2026-11-19）
+
+多语言：
+
+- **界面跟随 DSH 语言**：面板订阅 DSH 的 `locale` 服务，DSH 切语言时面板文案跟着变；默认「跟随 DSH」，也可在设置 → 语言里锁定「中文 / English」（存 `dsh-video.lang`）。
+- **AI 分析按当前语言输出**：总结、追问、章节、思维导图、画面描述全部按 `lang` 生成；中文 / 英文有完整模板与小节标题，其它语言（`ja/es/fr/de/ru/pt` 等）用英文模板 + 目标语言指令。
+- **缓存按语言隔离**：分析缓存里的 summary / chapters / mindmap 各带 `lang`，`/resolve` 只挂载与当前语言一致的部分；导图、大纲画面描述、分镜缓存同样按语言区分，切换语言不会看到上一门语言的旧内容。
+- **接口新增 `lang`**：`/resolve`、`/analyze`、`/chapters`、`/mindmap`、`/outline`、`/outline/visuals`、`/storyboard`、`/transcribe`、`/jobs` 均接受 `lang`；agent 工具 `video` / `video_digest` 也新增 `lang` 参数。
+- 英文/多语言下模型更爱先思考：章节与思维导图的 token 预算上调（避免 `llm-empty`）。
+- 已知限制：ASR 设置子区块的部分说明文案仍是中文；未知错误码仍显示 host 的中文提示。
+
 ## v0.10.2（2026-11-19）
 
 界面与交互修正：

@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#已知限制)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.10.2-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.11.0-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -241,6 +241,13 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 ```
 
 面板「设置」里保存的 Cookie 与本地转写配置都写在 `~/.dsh/video-credentials.json`，**优先级高于**行配置，改完立即生效。
+
+## 多语言
+
+- **界面跟随 DSH**：默认「跟随 DSH」——DSH 是中文界面就用中文，其它语言用英文（`ja/es/fr/de/ru/pt` 等 DSH 已内置的 locale 会传给 AI 作为输出语言）。
+- **可在设置里覆盖**：设置 → 语言，三选一「跟随 DSH / 中文 / English」，切换立即生效（存在本地 `dsh-video.lang`）。
+- **AI 输出对应语言**：总结、追问、章节、思维导图、画面描述都按当前语言生成；中文 / 英文有完整模板与小节标题，其它语言按英文模板 + 目标语言指令输出。
+- **缓存按语言分开**：同一条视频的中文总结和英文总结各自缓存，切换语言不会看到上一门语言的旧内容。
 
 ## 已知限制
 

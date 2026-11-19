@@ -5,7 +5,7 @@ English | [中文](./README.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#known-limitations)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.10.2-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.11.0-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -237,6 +237,13 @@ In `cordis.patch.yml`:
 ```
 
 The cookie and local-transcription settings saved from the panel go to `~/.dsh/video-credentials.json` and **take precedence** over the row config; changes apply immediately.
+
+## Languages
+
+- **UI follows DSH**: by default it follows the DSH locale — Chinese UI gets Chinese, anything else gets English (DSH locales such as `ja/es/fr/de/ru/pt` are also passed to the AI as the output language).
+- **Override in Settings**: Settings → Language, choose "Follow DSH / 中文 / English"; the change applies immediately (stored locally as `dsh-video.lang`).
+- **AI output in that language**: summaries, follow-ups, chapters, mind map and frame descriptions are generated in the current language; Chinese and English have full templates and section headings, other languages use the English template plus an explicit target-language instruction.
+- **Caches are per language**: a Chinese summary and an English summary of the same video are cached separately, so switching languages never shows stale content in the other language.
 
 ## Known limitations
 

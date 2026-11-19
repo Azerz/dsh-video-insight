@@ -24,7 +24,7 @@ const API_BASE = new URL('dsh-video/api/', document.baseURI).toString();
 } }
 ```
 
-## GET /resolve?url=<链接>&force=1
+## GET /resolve?url=<链接>&force=1&lang=zh
 
 成功：
 
@@ -117,7 +117,7 @@ data: {"type":"error","message":"模型调用失败：…"}
 - 总结 (`mode=summary`) 的 `done` 帧还带 `suggestions: string[]`（模型在正文末尾写的「继续追问」三条，host 已从 `text` 里剥掉，只在这里和缓存里给）。
 - host 会自动持久化结果：summary 成功写 `summary`（含 `suggestions`）；ask 成功把「用户问题 + 助手回答（含 citations）」追加进 `chat`。
 
-## POST /chapters
+## POST /chapters（body `{docId?/url?, lang?}`）
 
 生成成功后 host 会把章节写进该视频的分析缓存（见「分析缓存」）。
 
@@ -131,7 +131,7 @@ data: {"type":"error","message":"模型调用失败：…"}
 ] } }
 ```
 
-## GET /mindmap?docId=<docId>&force=1
+## GET /mindmap?docId=<docId>&force=1&lang=zh
 
 从字幕（或本地转写）生成思维导图树，非流式一次返回。首次调用约 8-12 秒，
 之后同一视频命中内存缓存（LRU 32，按「文档 + 字幕指纹」失效），`force=1` 重新生成。
@@ -300,6 +300,18 @@ data: {"type":"error","code":"asr-needs-ytdlp","message":"…"}
 
 转写稿太长但没召回到相关内容时，prompt 会明确要求「说没有提到，不要编」。
 检索索引在内存 LRU（8 份，按 docId + 字幕指纹失效），首次追问会多花几十毫秒切窗。
+
+## 多语言（`lang`）
+
+面板会把当前界面语言作为查询参数 / JSON 字段 `lang` 带到 host（缺省 `zh`，`zh-CN` 之类的值会归一到 `zh`）。Host 用它对「会写自然语言」的请求做三件事：
+
+1. **提示词换语言**：总结、追问、章节、思维导图、画面描述都按 `lang` 选系统提示与示例（`zh` / `en` 有完整模板；其它语言用英文模板 + 「Respond entirely in <语言>」指令，模型会按目标语言输出）。
+2. **返回 `lang`**：`POST /analyze` 的 `done` 帧、`GET /mindmap`、`POST /outline/visuals`、`POST /storyboard` 都会带上本次实际使用的 `lang`，面板据此匹配小节标题 / 徽标。
+3. **缓存按语言隔离**：分析缓存（`~/.dsh/video-analyses/*.json`）里的 `summary` / `chapters` / `mindmap` 各带 `lang`；`GET /resolve` 只挂载与请求 `lang` 一致的部分（不一致就先不返回，面板会按当前语言重新生成），避免中英混杂。导图磁盘缓存、大纲画面描述缓存、分镜缓存同理（`force=1` 可强制重算）。
+
+接口清单：`GET /resolve?url=&lang=`、`POST /analyze`（body `lang`）、`POST /chapters`（`lang`）、`GET /mindmap?docId=&lang=`、`GET /outline?docId=&lang=`、`POST /outline/visuals`（`lang`）、`POST /storyboard`（`lang`）、`POST /transcribe`（`lang`，影响画面描述语言）、`GET /jobs` / `POST /jobs/all`（`lang` 记进任务快照）。
+
+支持的语言 id：`zh en ja ko es fr de ru pt it ar hi th vi id tr`（完整支持界面文案与小节标题的是 `zh` / `en`）。
 
 ## 分析缓存
 
