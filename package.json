@@ -39,12 +39,16 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/*.js",
+    "CHANGELOG.md",
+    "CONTRACT.md",
+    "LICENSE",
+    "README.en.md",
+    "README.md",
     "client/*.js",
     "cordis.patch.yml",
-    "locale/*.json",
     "icon.svg",
-    "README.md"
+    "lib/*.js",
+    "locale/*.json"
   ],
   "dsh": {
     "bundle": {
