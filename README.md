@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#已知限制)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.11.1-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.12.0-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -186,6 +186,8 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | POST | `/dsh-video/api/asr/config` | `{enabled?,engine?,threads?,maxSeconds?,keepAudio?,autoTranscribe?,crossCheck?,ocrFallback?,ocrIntervalSeconds?,ocrMaxFrames?,frameSampling?:cuts\|uniform,cutThreshold?,frameMode?:auto\|ocr\|vision,visionModel?,visionMaxFrames?,visionPack?:sheet\|frames,sheetCols?}` → 新状态 |
 | GET | `/dsh-video/api/asr/models` | 本地模型（Whisper / SenseVoice）文件状态：每个文件的路径、期望/实际大小、是否存在 |
 | POST | `/dsh-video/api/asr/models` | SSE 下载模型：`{id:"whisper"\|"sensevoice"\|"all", force?}`，帧 `phase` / `progress{percent,received,total}` / `done` / `error{code}` |
+| GET | `/dsh-video/api/install/plan` | 本机组件（ffmpeg/ffprobe/yt-dlp/whisper-cli/sherpa-onnx）是否已装、安装方式与预计大小 |
+| POST | `/dsh-video/api/install` | SSE 一键安装组件：`{id:"ffmpeg"\|"ffprobe"\|"ytdlp"\|"whisper"\|"sherpa"\|"all"}`，帧 `phase` / `progress{component,stage,percent}` / `installed{component,path}` / `done` / `error{code}` |
 | POST | `/dsh-video/api/transcribe` | SSE：`{url?/docId?, force?}`，帧 `phase` / `progress{percent,stage}` / `done{docId,transcript,cached?}` / `error{code,message}`；无语音时自动兜底 OCR / 画面理解（stage 含 `vision`） |
 | POST | `/dsh-video/api/analyze` | SSE：`{mode:'summary'\|'ask', url?/docId?, question?, history?}`，帧 `phase` / `delta` / `done` / `error` |
 | POST | `/dsh-video/api/chapters` | `{url?/docId?}` → `{ok,value:{chapters:[{start,title,gist}],duration}}` |

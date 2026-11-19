@@ -332,6 +332,65 @@ window.__ModuleLoader__.load({
       'transcribe.retry': ['重试转写', 'Retry transcription'],
       'transcribe.start': ['本地转写', 'Transcribe locally'],
       'transcribe.working': ['转写中…', 'Transcribing…'],
+      'asr.title': ['本地语音转写', 'Local transcription'],
+      'asr.saving': ['保存中…', 'Saving…'],
+      'asr.loading': ['正在读取本地转写状态…', 'Loading local transcription status…'],
+      'asr.loadError': ['本地转写状态读取失败：{message}（点右上角「刷新状态」重试）', 'Failed to read local transcription status: {message} (click Refresh in the top-right to retry)'],
+      'asr.privacy': ['语音转写与画面文字识别完全在本机运行；画面理解会把抽样的画面图片发给当前模型（会离开本机）；摘要使用当前配置的模型。', 'Speech transcription and on-screen OCR run entirely on this machine; visual understanding sends sampled frames to the current model (they leave this machine); summaries use the configured model.'],
+      'asr.notReady': ['本机转写组件还没装好：{reason}。装好后点「重新检测」重新检测。', 'Local transcription tools are not ready: {reason}. Click "Re-check" after installing them.'],
+      'asr.notReadyFallback': ['缺少 ffmpeg / whisper / sherpa 之一', 'missing ffmpeg / whisper / sherpa'],
+      'asr.downloadNote': ['提示：下载视频音轨需要 yt-dlp；ffmpeg 用于提取与转换音频。', 'Note: yt-dlp is required to download audio; ffmpeg extracts and converts it.'],
+      'asr.enabledOn': ['已开启：无字幕视频可以在这台电脑上转写', 'Enabled: videos without captions can be transcribed on this machine'],
+      'asr.enabledOff': ['已关闭：无字幕视频不会转写', 'Disabled: videos without captions are not transcribed'],
+      'asr.autoCheck': ['无字幕视频自动转写（解析到没有字幕的视频时自动在本地跑一次转写，长视频可能要等一会儿）', 'Auto-transcribe videos without captions (runs once locally; long videos may take a while)'],
+      'asr.crossCheck': ['语音与画面并行分析', 'Run speech and vision analysis in parallel'],
+      'asr.crossNote': ['和语音转写同时跑画面分析，两路结果互相印证（多花一次视觉模型调用）。', 'Runs visual analysis alongside transcription so both results corroborate each other (one extra vision-model call).'],
+      'asr.ocrAvailable': ['没有语音时识别画面文字（OCR）：可用（纯音乐/无声视频也能出文字稿）', 'Recognize on-screen text when there is no speech (OCR): available (also works for silent videos)'],
+      'asr.ocrUnavailable': ['没有语音时识别画面文字（OCR）：不可用{reason}', 'Recognize on-screen text when there is no speech (OCR): unavailable{reason}'],
+      'asr.ocrFallbackReason': ['暂不支持', 'not supported here'],
+      'asr.ocrInterval': ['抽帧间隔（秒）', 'Frame interval (seconds)'],
+      'asr.ocrIntervalHint': ['越小越细但更慢', 'Smaller = finer but slower'],
+      'asr.ocrFrames': ['最多识别帧数', 'Max OCR frames'],
+      'asr.ocrFramesHint': ['默认 120 帧', '120 frames by default'],
+      'asr.ocrPrivacy': ['画面文字识别用系统自带的 Vision 框架离线完成，视频和画面都不会上传。', 'On-screen OCR uses the built-in Vision framework offline; neither the video nor the frames are uploaded.'],
+      'asr.visionTitle': ['画面理解（视觉模型）', 'Visual understanding (vision model)'],
+      'asr.visionMode': ['画面理解模式', 'Visual understanding mode'],
+      'asr.frameAuto': ['自动', 'Auto'],
+      'asr.frameOcr': ['仅画面文字', 'OCR only'],
+      'asr.frameVision': ['画面理解', 'Vision'],
+      'asr.frameAutoDesc': ['自动（推荐）：先在本机识别画面文字，文字太少时再让视觉模型看画面。', 'Auto (recommended): OCR on-device first; the vision model steps in only when there is little text.'],
+      'asr.frameOcrDesc': ['仅画面文字（OCR）：完全在本机运行，抽帧与识别都不会联网。', 'OCR only: runs entirely on-device; no frames or text leave this machine.'],
+      'asr.frameVisionDesc': ['画面理解（视觉模型）：会抽取画面图片发给当前模型（图片会离开本机）。', 'Vision: sampled frames are sent to the configured model (images leave this machine).'],
+      'asr.visionReady': ['画面理解可用 · {route}{actual}', 'Visual understanding ready · {route}{actual}'],
+      'asr.visionActual': ['（当前实际：{mode}）', ' (currently using {mode})'],
+      'asr.visionUnavailable': ['画面理解不可用：{reason}', 'Visual understanding unavailable: {reason}'],
+      'asr.visionFallbackReason': ['当前没有可用的视觉模型或附件服务', 'no vision model or attachment service is available'],
+      'asr.visionTry': ['可切换为 {list}', 'Try: {list}'],
+      'asr.visionNoImage': ['当前模型不支持图片输入：请改用「自动」或「仅画面文字」。', 'The current model does not support image input: switch to Auto or OCR only.'],
+      'asr.visionModel': ['视觉模型', 'Vision model'],
+      'asr.visionModelHint': ['留空 = 使用会话默认模型；可填 provider/model 覆盖', 'Empty = use the session default model; provider/model overrides it'],
+      'asr.visionFrames': ['画面理解最多帧数', 'Max vision frames'],
+      'asr.visionFramesHint': ['每帧约 2-4 秒；可填 8–160 帧', 'About 2–4 s per frame; 8–160 allowed'],
+      'asr.visionPrivacy': ['画面理解会把抽出来的画面图片交给当前模型（会离开本机）；OCR 仍然完全在本机运行。', 'Visual understanding sends sampled frames to the current model (they leave this machine); OCR still runs entirely on-device.'],
+      'asr.engine': ['识别引擎', 'Engine'],
+      'asr.engineAuto': ['自动选择', 'Auto'],
+      'asr.engineWhisper': ['Whisper（whisper.cpp）', 'Whisper (whisper.cpp)'],
+      'asr.engineSenseVoice': ['SenseVoice（sherpa-onnx）', 'SenseVoice (sherpa-onnx)'],
+      'asr.engineNotReady': ['（未就绪）', ' (not ready)'],
+      'asr.engineUnknown': ['未知', 'unknown'],
+      'asr.engineCurrent': ['当前使用：{engine}', 'In use: {engine}'],
+      'asr.threads': ['线程数', 'Threads'],
+      'asr.threadsHint': ['0 = 自动', '0 = auto'],
+      'asr.maxSeconds': ['最长处理时长（秒）', 'Max duration (seconds)'],
+      'asr.maxSecondsHint': ['0 = 不限制；只处理前 N 秒可以明显加速', '0 = unlimited; limiting to the first N seconds speeds things up'],
+      'asr.keepAudio': ['保留临时音频（~/.dsh/video-models/last-audio.*，默认不保留）', 'Keep temporary audio (~/.dsh/video-models/last-audio.*, off by default)'],
+      'asr.hintPrefix': ['提示：', 'Tip: '],
+      'asr.hintGeneric': ['部分组件缺失或未就绪，请检查下方安装提示与路径配置。', 'Some components are missing or not ready; check the installation hints and paths below.'],
+      'asr.unnamedModel': ['未命名模型', 'unnamed model'],
+      'asr.modelWhisper': ['Whisper', 'Whisper'],
+      'asr.modelSenseVoice': ['SenseVoice', 'SenseVoice'],
+      'asr.stageVision': ['画面理解中', 'Understanding frames'],
+      'asr.stageOcr': ['画面文字识别中', 'Reading on-screen text'],
       'error.model-load': ['读取模型信息失败：{message}', 'Failed to load model info: {message}'],
       'error.model-download': ['下载模型失败：{message}', 'Model download failed: {message}'],
       'error.model-cancelled': ['已取消下载模型', 'Model download cancelled'],
@@ -966,6 +1025,8 @@ window.__ModuleLoader__.load({
     function stageText(stage) {
       const key = String(stage ?? '').trim();
       if (!key) return '';
+      if (key === 'vision') return t('asr.stageVision');
+      if (key === 'ocr') return t('asr.stageOcr');
       return STAGE_LABEL[key] || key;
     }
 
@@ -2774,7 +2835,7 @@ window.__ModuleLoader__.load({
       };
       return h('input', {
         className: 'dvv-input', type: 'text', value: draft, placeholder: VISION_MODEL_PLACEHOLDER,
-        'aria-label': '视觉模型', spellCheck: false,
+        'aria-label': t('asr.visionModel'), spellCheck: false,
         onChange: (event) => setDraft(event.target.value),
         onBlur: commit,
         onKeyDown: (event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); } },
@@ -2816,6 +2877,12 @@ window.__ModuleLoader__.load({
      * 模型卡片：Whisper / SenseVoice 的文件路径、大小与下载按钮（SSE 进度）。
      */
     function AsrModelsBlock({ models, error, downloading, saving, onDownload, onCancel, onSavePath }) {
+      const uiEn = activeUiLang === 'en';
+      const modelLabel = (id, meta) => {
+        const label = String((meta && meta.label) || '');
+        if (!uiEn || !/[㐀-鿿]/.test(label)) return label || String(id);
+        return id === 'sensevoice' ? t('asr.modelSenseVoice') : t('asr.modelWhisper');
+      };
       const rows = [h('div', { key: 'head', className: 'dvv-asr-head' }, h('span', { className: 'dvv-label' }, t('asr.models.title')))];
       if (!models) {
         rows.push(h('div', { key: 'loading', className: 'dvv-note' }, error ? t('error.model-load', { message: error }) : t('asr.models.loading')));
@@ -2843,7 +2910,7 @@ window.__ModuleLoader__.load({
         });
         return h('div', { key: `m-${id}`, className: 'dvv-model-card' }, [
           h('div', { key: 'h', className: 'dvv-model-head' }, [
-            h('span', { key: 't', className: 'dvv-label' }, String(meta.label || id)),
+            h('span', { key: 't', className: 'dvv-label' }, modelLabel(id, meta)),
             h('span', {
               key: 's', className: 'dvv-mini', 'data-ok': meta.available ? 'true' : 'false',
             }, meta.available ? t('asr.models.ready') : t('asr.models.missing')),
@@ -2916,75 +2983,84 @@ window.__ModuleLoader__.load({
     function AsrSection({ asr, saving, note, error, onConfig, onRefresh, models, modelsError, downloading, onDownloadModel, onCancelDownload, onCopied }) {
       if (!asr) {
         return h('div', { className: 'dvv-asr-box' }, [
-          h('div', { key: 't', className: 'dvv-label' }, '本地语音转写'),
-          h('div', { key: 'e', className: 'dvv-note' }, error ? `本地转写状态读取失败：${error}（点右上角「刷新状态」重试）` : '正在读取本地转写状态…'),
+          h('div', { key: 't', className: 'dvv-label' }, t('asr.title')),
+          h('div', { key: 'e', className: 'dvv-note' }, error ? t('asr.loadError', { message: error }) : t('asr.loading')),
         ]);
       }
       const config = asr.config || {};
       const tools = asr.tools || {};
       const modelsInfo = asr.models || {};
       const engines = asr.engines || {};
-      const hints = Array.isArray(asr.hints) ? asr.hints.filter(Boolean) : [];
-      const whisperModel = (modelsInfo.whisper || {}).path || '';
-      const senseVoice = modelsInfo.sensevoice || {};
-      const engineLabel = (key) => {
-        const meta = engines[key];
-        return `${(meta && meta.label) || key}${meta && meta.available === false ? '（未就绪）' : ''}`;
+      const hints = (Array.isArray(asr.hints) ? asr.hints : []).filter(Boolean);
+      const uiEn = activeUiLang === 'en';
+      const hasCjk = (text) => /[\u3400-\u9fff]/.test(String(text || ''));
+      const safeText = (text, fallbackKey) => {
+        const value = String(text || '').trim();
+        if (!value) return '';
+        return uiEn && hasCjk(value) ? t(fallbackKey) : value;
+      };
+      const engineKeys = { auto: 'asr.engineAuto', whisper: 'asr.engineWhisper', sensevoice: 'asr.engineSenseVoice' };
+      const engineName = (key) => (engineKeys[key] ? t(engineKeys[key]) : String(key));
+      const engineLabel = (key) => `${engineName(key)}${engines[key] && engines[key].available === false ? t('asr.engineNotReady') : ''}`;
+      const frameModes = [
+        ['auto', 'asr.frameAuto', 'asr.frameAutoDesc'],
+        ['ocr', 'asr.frameOcr', 'asr.frameOcrDesc'],
+        ['vision', 'asr.frameVision', 'asr.frameVisionDesc'],
+      ];
+      const frameName = (key) => {
+        const item = frameModes.filter((entry) => entry[0] === key)[0];
+        return item ? t(item[1]) : String(key);
       };
       const rows = [
         h('div', { key: 'head', className: 'dvv-asr-head' }, [
-          h('span', { key: 't', className: 'dvv-label' }, '本地语音转写'),
-          saving ? h('span', { key: 'saving', className: 'dvv-note' }, '保存中…') : null,
+          h('span', { key: 't', className: 'dvv-label' }, t('asr.title')),
+          saving ? h('span', { key: 'saving', className: 'dvv-note' }, t('asr.saving')) : null,
         ].filter(Boolean)),
+        h('div', { key: 'privacy', className: 'dvv-asr-privacy' }, t('asr.privacy')),
       ];
-      if (asr.privacy) rows.push(h('div', { key: 'privacy', className: 'dvv-asr-privacy' }, String(asr.privacy)));
       if (asr.ready === false) {
-        rows.push(h('div', { key: 'miss', className: 'dvv-warn' }, `本机转写组件还没装好：${hints[0] || '缺少 ffmpeg / whisper / sherpa 之一'}。装好后点「刷新状态」重新检测。`));
+        rows.push(h('div', { key: 'miss', className: 'dvv-warn' }, t('asr.notReady', { reason: uiEn ? t('asr.notReadyFallback') : (hints[0] || t('asr.notReadyFallback')) })));
       }
-      if (asr.downloadReady === false) {
-        rows.push(h('div', { key: 'dl', className: 'dvv-note' }, '提示：下载视频音轨需要 yt-dlp；ffmpeg 用于提取与转换音频。'));
-      }
+      if (asr.downloadReady === false) rows.push(h('div', { key: 'dl', className: 'dvv-note' }, t('asr.downloadNote')));
       rows.push(h('label', { key: 'enabled', className: 'dvv-check' }, [
         h('input', { key: 'c', type: 'checkbox', checked: Boolean(asr.enabled), onChange: () => onConfig({ enabled: !asr.enabled }) }),
-        h('span', { key: 't' }, asr.enabled ? '已开启：无字幕视频可以在这台电脑上转写' : '已关闭：无字幕视频不会转写'),
+        h('span', { key: 't' }, asr.enabled ? t('asr.enabledOn') : t('asr.enabledOff')),
       ]));
       rows.push(h('label', { key: 'auto', className: 'dvv-check' }, [
         h('input', {
           key: 'c', type: 'checkbox', checked: config.autoTranscribe !== false,
           onChange: () => onConfig({ autoTranscribe: config.autoTranscribe === false }),
         }),
-        h('span', { key: 't' }, '无字幕视频自动转写（解析到没有字幕的视频时自动在本地跑一次转写，长视频可能要等一会儿）'),
+        h('span', { key: 't' }, t('asr.autoCheck')),
       ]));
       rows.push(h('label', { key: 'cross', className: 'dvv-check' }, [
         h('input', {
           key: 'c', type: 'checkbox', checked: config.crossCheck !== false,
           onChange: () => onConfig({ crossCheck: config.crossCheck === false }),
         }),
-        h('span', { key: 't' }, '语音与画面并行分析'),
+        h('span', { key: 't' }, t('asr.crossCheck')),
       ]));
-      rows.push(h('div', { key: 'cross-note', className: 'dvv-note' }, '和语音转写同时跑画面分析，两路结果互相印证（多花一次视觉模型调用）。'));
+      rows.push(h('div', { key: 'cross-note', className: 'dvv-note' }, t('asr.crossNote')));
       const ocr = asr.ocr || {};
+      const ocrReason = ocr.reason ? safeText(ocr.reason, 'asr.ocrFallbackReason') : '';
       rows.push(h('label', { key: 'ocr', className: 'dvv-check' }, [
         h('input', {
           key: 'c', type: 'checkbox', checked: config.ocrFallback !== false,
           onChange: () => onConfig({ ocrFallback: config.ocrFallback === false }),
         }),
-        h('span', { key: 't' }, `没有语音时识别画面文字（OCR）：${ocr.available ? '可用' : `不可用${ocr.reason ? ` · ${ocr.reason}` : ''}`}${ocr.available ? '（纯音乐/无声视频也能出文字稿）' : ''}`),
+        h('span', { key: 't' }, ocr.available ? t('asr.ocrAvailable') : t('asr.ocrUnavailable', { reason: ocrReason ? ` · ${ocrReason}` : '' })),
       ]));
-      if (ocr.available && ocr.note) {
-        rows.push(h('div', { key: 'ocr-note', className: 'dvv-note' }, String(ocr.note)));
-      }
       rows.push(h('div', { key: 'ocr-numbers', className: 'dvv-asr-grid' }, [
         h(AsrNumberField, {
-          key: 'ocr-interval', label: '抽帧间隔（秒）', value: config.ocrIntervalSeconds ?? 8, min: 3, max: 60,
-          hint: '越小越细但更慢', onCommit: (number) => onConfig({ ocrIntervalSeconds: number }),
+          key: 'ocr-interval', label: t('asr.ocrInterval'), value: config.ocrIntervalSeconds ?? 8, min: 3, max: 60,
+          hint: t('asr.ocrIntervalHint'), onCommit: (number) => onConfig({ ocrIntervalSeconds: number }),
         }),
         h(AsrNumberField, {
-          key: 'ocr-frames', label: '最多识别帧数', value: config.ocrMaxFrames ?? 120, min: 20, max: 240,
-          hint: '默认 120 帧', onCommit: (number) => onConfig({ ocrMaxFrames: number }),
+          key: 'ocr-frames', label: t('asr.ocrFrames'), value: config.ocrMaxFrames ?? 120, min: 20, max: 240,
+          hint: t('asr.ocrFramesHint'), onCommit: (number) => onConfig({ ocrMaxFrames: number }),
         }),
       ]));
-      rows.push(h('div', { key: 'ocr-privacy', className: 'dvv-note' }, '空间识别用 macOS 自带的 Vision 框架离线完成，视频和画面都不会上传。'));
+      rows.push(h('div', { key: 'ocr-privacy', className: 'dvv-note' }, t('asr.ocrPrivacy')));
 
       // 「画面理解」子区块：没有可用文字时，用视觉模型看抽样画面（图片会离开本机）。
       const vision = asr.vision || {};
@@ -2996,70 +3072,70 @@ window.__ModuleLoader__.load({
       const candidates = Array.isArray(vision.candidates) ? vision.candidates : [];
       const candidateLabels = candidates
         .map((item) => (typeof item === 'string' ? item : String((item && (item.routeLabel || item.label || item.model)) || '')))
-        .filter(Boolean);
-      rows.push(h('div', { key: 'vision-head', className: 'dvv-label' }, '画面理解（视觉模型）'));
-      rows.push(h('div', { key: 'vision-mode', className: 'dvv-vseg', role: 'group', 'aria-label': '画面理解模式' },
-        FRAME_MODES.map(([key, label]) => h('button', {
+        .filter(Boolean)
+        .filter((label) => !uiEn || !hasCjk(label));
+      rows.push(h('div', { key: 'vision-head', className: 'dvv-label' }, t('asr.visionTitle')));
+      rows.push(h('div', { key: 'vision-mode', className: 'dvv-vseg', role: 'group', 'aria-label': t('asr.visionMode') },
+        frameModes.map(([key, labelKey, descKey]) => h('button', {
           key, type: 'button', className: 'dvv-vseg-btn',
           'data-active': frameMode === key ? 'true' : undefined,
           'aria-pressed': frameMode === key ? 'true' : 'false',
-          title: FRAME_MODE_DESC[key] || label,
+          title: t(descKey),
           onClick: () => onConfig({ frameMode: key }),
-        }, label))));
-      rows.push(h('div', { key: 'vision-mode-desc', className: 'dvv-note' }, FRAME_MODE_DESC[frameMode] || FRAME_MODE_DESC.auto));
+        }, t(labelKey)))));
+      const frameDesc = () => { const item = frameModes.filter((entry) => entry[0] === frameMode)[0] || frameModes[0]; return t(item[2]); };
+      rows.push(h('div', { key: 'vision-mode-desc', className: 'dvv-note' }, frameDesc()));
       if (vision.available) {
-        const route = String(vision.routeLabel || [vision.provider, vision.model].filter(Boolean).join('/') || '未命名模型');
+        const route = safeText(vision.routeLabel || [vision.provider, vision.model].filter(Boolean).join('/'), 'asr.unnamedModel') || t('asr.unnamedModel');
+        const actual = visionMode && visionMode !== frameMode ? t('asr.visionActual', { mode: frameName(visionMode) }) : '';
         rows.push(h('div', { key: 'vision-state', className: 'dvv-cap' }, [
           h('span', { key: 'd', className: 'dvv-cap-dot', 'data-ok': 'true' }),
-          h('span', { key: 't', className: 'dvv-cap-text' }, `画面理解可用 · ${route}${visionMode && visionMode !== frameMode ? `（当前实际：${visionMode}）` : ''}`),
+          h('span', { key: 't', className: 'dvv-cap-text' }, t('asr.visionReady', { route, actual })),
         ]));
       } else {
+        const reason = safeText(vision.reason, 'asr.visionFallbackReason') || t('asr.visionFallbackReason');
+        const list = candidateLabels.slice(0, 2).join(uiEn ? ', ' : '、');
         rows.push(h('div', { key: 'vision-state', className: 'dvv-warn' },
-          [
-            `画面理解不可用${vision.reason ? `：${vision.reason}` : '：当前没有可用的视觉模型或附件服务'}`,
-            candidateLabels.length ? `可切换为 ${candidateLabels.slice(0, 2).join('、')}` : '',
-          ].filter(Boolean).join('；')));
+          [t('asr.visionUnavailable', { reason }), list ? t('asr.visionTry', { list }) : ''].filter(Boolean).join(uiEn ? '; ' : '；')));
       }
       if (vision.supportsImage === false) {
-        rows.push(h('div', { key: 'vision-image', className: 'dvv-note' }, '当前模型不支持图片输入：请改用「自动」或「仅画面文字」。'));
+        rows.push(h('div', { key: 'vision-image', className: 'dvv-note' }, t('asr.visionNoImage')));
       }
       rows.push(h('div', { key: 'vision-model', className: 'dvv-asr-field' }, [
-        h('span', { key: 'l', className: 'dvv-label' }, '视觉模型'),
+        h('span', { key: 'l', className: 'dvv-label' }, t('asr.visionModel')),
         h(VisionModelField, { key: 'i', value: visionModelValue, onCommit: (text) => onConfig({ visionModel: text }) }),
-        h('span', { key: 'h', className: 'dvv-note' }, '留空 = 使用会话默认模型；可填 provider/model 覆盖'),
+        h('span', { key: 'h', className: 'dvv-note' }, t('asr.visionModelHint')),
       ]));
       rows.push(h('div', { key: 'vision-numbers', className: 'dvv-asr-grid' }, [
         h(AsrNumberField, {
-          key: 'vision-frames', label: '画面理解最多帧数', value: visionMaxFrames, min: 8, max: 160,
-          hint: '每帧约 2-4 秒；可填 8–160 帧', onCommit: (number) => onConfig({ visionMaxFrames: number }),
+          key: 'vision-frames', label: t('asr.visionFrames'), value: visionMaxFrames, min: 8, max: 160,
+          hint: t('asr.visionFramesHint'), onCommit: (number) => onConfig({ visionMaxFrames: number }),
         }),
       ]));
-      if (vision.privacy) {
-        rows.push(h('div', { key: 'vision-privacy', className: 'dvv-note' }, String(vision.privacy)));
-      }
+      rows.push(h('div', { key: 'vision-privacy', className: 'dvv-note' }, t('asr.visionPrivacy')));
       rows.push(h('div', { key: 'engine', className: 'dvv-asr-row' }, [
-        h('span', { key: 'l', className: 'dvv-label' }, '识别引擎'),
+        h('span', { key: 'l', className: 'dvv-label' }, t('asr.engine')),
         h('select', {
-          key: 's', className: 'dvv-select', value: String(asr.engine || 'auto'), 'aria-label': '识别引擎',
+          key: 's', className: 'dvv-select', value: String(asr.engine || 'auto'), 'aria-label': t('asr.engine'),
           onChange: (event) => onConfig({ engine: event.target.value }),
-        }, ASR_ENGINES.map(([key, label]) => h('option', {
+        }, ['auto', 'whisper', 'sensevoice'].map((key) => h('option', {
           key, value: key, disabled: Boolean(engines[key] && engines[key].available === false),
-        }, label))),
-        h('span', { key: 'cur', className: 'dvv-note' }, `当前使用：${asr.activeEngine ? engineLabel(asr.activeEngine) : (asr.engineLabel || '未知')}`),
+        }, engineName(key)))),
+        h('span', { key: 'cur', className: 'dvv-note' }, t('asr.engineCurrent', { engine: asr.activeEngine ? engineLabel(asr.activeEngine) : t('asr.engineUnknown') })),
       ]));
       rows.push(h('div', { key: 'numbers', className: 'dvv-asr-grid' }, [
         h(AsrNumberField, {
-          key: 'threads', label: '线程数', value: config.threads ?? 0, min: 0, max: 32,
-          hint: '0 = 自动', onCommit: (number) => onConfig({ threads: number }),
+          key: 'threads', label: t('asr.threads'), value: config.threads ?? 0, min: 0, max: 32,
+          hint: t('asr.threadsHint'), onCommit: (number) => onConfig({ threads: number }),
         }),
         h(AsrNumberField, {
-          key: 'seconds', label: '最长处理时长（秒）', value: config.maxSeconds ?? 0, min: 0, max: 7200,
-          hint: '0 = 不限制；只处理前 N 秒可以明显加速', onCommit: (number) => onConfig({ maxSeconds: number }),
+          key: 'seconds', label: t('asr.maxSeconds'), value: config.maxSeconds ?? 0, min: 0, max: 7200,
+          hint: t('asr.maxSecondsHint'), onCommit: (number) => onConfig({ maxSeconds: number }),
         }),
       ]));
       rows.push(h('label', { key: 'keep', className: 'dvv-check' }, [
         h('input', { key: 'c', type: 'checkbox', checked: Boolean(config.keepAudio), onChange: () => onConfig({ keepAudio: !config.keepAudio }) }),
-        h('span', { key: 't' }, '保留临时音频（~/.dsh/video-models/last-audio.*，默认不保留）'),
+        h('span', { key: 't' }, t('asr.keepAudio')),
       ]));
       rows.push(h('div', { key: 'tools-head', className: 'dvv-asr-head' }, [
         h('span', { key: 't', className: 'dvv-label' }, t('asr.comp.title')),
@@ -3088,8 +3164,9 @@ window.__ModuleLoader__.load({
         key: 'install', platform: String(tools.platform || ''),
         onCopied: () => { if (onCopied) onCopied(); },
       }));
-      hints.forEach((hint, index) => {
-        rows.push(h('div', { key: `hint-${index}`, className: 'dvv-note' }, `提示：${hint}`));
+      const hintLines = uiEn ? [t('asr.hintGeneric')] : hints;
+      hintLines.forEach((hint, index) => {
+        rows.push(h('div', { key: `hint-${index}`, className: 'dvv-note' }, `${t('asr.hintPrefix')}${hint}`));
       });
       if (note) rows.push(h('div', { key: 'note', className: 'dvv-note' }, note));
       if (error) rows.push(h('div', { key: 'error', className: 'dvv-error' }, error));

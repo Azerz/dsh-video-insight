@@ -2,6 +2,13 @@
 
 本项目的版本号与 `package.json` 保持一致；面板是单文件客户端，刷新页面即生效。
 
+## v0.12.0（2026-11-19）
+
+- 新增：**本机组件一键安装**（`GET /install/plan`、`POST /install` SSE）——ffmpeg / ffprobe / yt-dlp / whisper-cli（Windows）/ sherpa-onnx 直接下载便携版到 `~/.dsh/video-tools/`，装完自动写回路径配置，不用再手动填。
+- 改进：设置里缺组件时可直接点「自动安装」，带进度与取消；macOS 的 whisper.cpp 仍推荐 Homebrew（给出命令与复制按钮）。
+- 改进：英文界面设置里的 ASR 区块完全本地化（OCR / 画面理解 / 语音转写字段、hints、引擎名），英文界面不再出现中文残留。
+- 改进：组件探测覆盖 Windows（`.exe`、winget/scoop 目录、sherpa-onnx 解压目录递归查找）。
+
 ## v0.11.1（2026-11-19）
 
 - 修复：Windows 上分析缓存文件名含 `:` 导致 `EINVAL rename` 失败（`youtube:xxx` 的缓存文件改成 `youtube_xxx.json`，旧文件自动兼容读取）。

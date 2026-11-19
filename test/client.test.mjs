@@ -2415,6 +2415,70 @@ if (!clickText(tree, 'Close')) clickText(tree, '关闭');
 tree = await settle(30);
 
 
+/* ---------------- task-29: ASR 设置区块中英文本地化 ---------------- */
+
+const asrBoxText = () => {
+  const box = byClass(tree, 'dvv-asr-box');
+  return box ? nodeText(box) : '';
+};
+const cjkChars = (text) => String(text || '').match(/[\u3400-\u9fff]/g) || [];
+const recheckAsr = async () => {
+  if (!clickText(tree, 'Re-check')) clickText(tree, '重新检测');
+  tree = await settle(40);
+};
+
+// 切英文并打开设置
+clickText(tree, '设置');
+tree = await settle(40);
+clickText(tree, 'English');
+tree = await settle(40);
+checkIncludes('task29 英文 ASR 标题', asrBoxText(), 'Local transcription');
+checkIncludes('task29 英文并行分析文案', asrBoxText(), 'Run speech and vision analysis in parallel');
+checkIncludes('task29 英文 OCR 抽帧标签', asrBoxText(), 'Frame interval (seconds)');
+checkIncludes('task29 英文画面理解标题', asrBoxText(), 'Visual understanding (vision model)');
+checkIncludes('task29 英文引擎当前使用', asrBoxText(), 'In use: Whisper (whisper.cpp)');
+checkIncludes('task29 英文保留音频说明', asrBoxText(), 'Keep temporary audio');
+check('task29 英文 ASR 区块无中文残留', cjkChars(asrBoxText()).length === 0);
+
+// host 中文 hints：英文下不直接显示，改用通用英文提示
+asrStatusOverride = { ...ASR, hints: ['当前环境没有可用的 yt-dlp，无法下载 B 站音频'] };
+await recheckAsr();
+checkIncludes('task29 英文下 hints 用通用英文提示', asrBoxText(), 'Some components are missing or not ready');
+check('task29 英文下不显示 host 中文 hints', !asrBoxText().includes('无法下载 B 站音频') && cjkChars(asrBoxText()).length === 0);
+
+// OCR 不可用 + 中文 reason → 英文兜底
+asrStatusOverride = JSON.parse(JSON.stringify(ASR));
+asrStatusOverride.ocr.available = false;
+asrStatusOverride.ocr.reason = '当前平台不支持画面文字识别';
+await recheckAsr();
+checkIncludes('task29 英文 OCR 不可用文案', asrBoxText(), 'Recognize on-screen text when there is no speech (OCR): unavailable');
+check('task29 OCR reason 中文被英文兜底', !asrBoxText().includes('当前平台不支持画面文字识别') && cjkChars(asrBoxText()).length === 0);
+
+// 画面理解不可用 + 中文 reason → 英文兜底
+asrStatusOverride = JSON.parse(JSON.stringify(ASR));
+asrStatusOverride.vision.available = false;
+asrStatusOverride.vision.reason = '没有可用的视觉模型';
+await recheckAsr();
+checkIncludes('task29 英文画面理解不可用文案', asrBoxText(), 'Visual understanding unavailable:');
+check('task29 画面理解 reason 中文被英文兜底', !asrBoxText().includes('没有可用的视觉模型') && cjkChars(asrBoxText()).length === 0);
+
+// 还原 host 状态并切回中文：zh 下 hints 仍按 host 文案展示
+asrStatusOverride = { ...ASR, hints: ['提示样本：请安装 yt-dlp'] };
+await recheckAsr();
+if (!clickText(tree, 'Close')) clickText(tree, '关闭');
+tree = await settle(30);
+if (!clickText(tree, 'Settings')) clickText(tree, '设置');
+tree = await settle(40);
+if (!clickText(tree, 'Follow DSH')) clickText(tree, '跟随 DSH');
+tree = await settle(40);
+await recheckAsr();
+checkIncludes('task29 中文界面 ASR 区块', asrBoxText(), '本地语音转写');
+checkIncludes('task29 中文下显示 host hints', asrBoxText(), '提示样本：请安装 yt-dlp');
+asrStatusOverride = null;
+if (!clickText(tree, '关闭')) clickText(tree, 'Close');
+tree = await settle(30);
+
+
 check('渲染期间没有运行时异常', runtimeErrors.length === 0);
 if (runtimeErrors.length) console.log(`运行时异常：\n${runtimeErrors.slice(0, 3).join('\n')}`);
 
