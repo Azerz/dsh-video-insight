@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#已知限制)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.11.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.11.1-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -152,6 +152,30 @@ curl -s http://127.0.0.1:49269/dsh-video/api/status   # 端口以实际 GUI 为�
 
 host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文件、不跑构建。可选依赖（仅本地转写/画面识别需要）：`brew install ffmpeg yt-dlp whisper.cpp`，详见上文。
 
+### 本机组件与本地模型（可选）
+
+只有「没字幕的视频」才会用到本机组件；有字幕时什么都不用装。
+
+| 组件 | 用途 | macOS | Windows |
+| --- | --- | --- | --- |
+| ffmpeg / ffprobe | 抽帧、转 wav | `brew install ffmpeg` | `winget install Gyan.FFmpeg` |
+| yt-dlp | 下音频/低清视频 | `brew install yt-dlp` | `winget install yt-dlp.yt-dlp` |
+| whisper.cpp（`whisper-cli`） | Whisper 本地转写 | `brew install whisper.cpp` | 从 [whisper.cpp releases](https://github.com/ggml-org/whisper.cpp/releases) 下 `whisper-bin-x64.zip` 解压，把 `whisper-cli.exe` 路径填进设置 |
+| sherpa-onnx | SenseVoice 本地转写 | 从 [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases) 下 macOS 包解压到 `~/.dsh/video-tools/sherpa-onnx` | 同上，下 Windows 包解压到同一位置 |
+
+模型文件默认放在 `~/.dsh/video-models/`（Windows 是 `C:\Users\<你>\.dsh\video-models\`）：
+
+- `ggml-large-v3-turbo-q5_0.bin`（约 574 MB，Whisper）
+- `sensevoice/model.int8.onnx` + `sensevoice/tokens.txt`（约 240 MB，SenseVoice）
+
+三种准备方式，任选一种：
+
+1. **在面板里点一下**：设置 → 本地语音转写 → 模型卡片「下载」，进度条走完即用（`POST /dsh-video/api/asr/models`）。
+2. **手动下载**：[Whisper 模型](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin) / [SenseVoice 模型](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/model.int8.onnx) + [tokens.txt](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/tokens.txt)，放到上面目录。
+3. **放到别处**：设置里把 `whisperModelPath` / `sensevoiceModelPath` / `sensevoiceTokensPath` 改成你的路径；组件同理可改 `ffmpegPath` / `ytdlpPath` / `whisperBinaryPath` / `sherpaBinaryPath`（留空用默认与 PATH 查找）。
+
+`GET /dsh-video/api/asr/models` 可以随时看每个文件在不在、大小对不对。
+
 ## 同源 API（面板用，也可自己 curl）
 
 | 方法 | 路径 | 说明 |
@@ -160,6 +184,8 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | GET | `/dsh-video/api/resolve?url=&force=1` | 解析链接 → `VideoDoc`（失败也是 HTTP 200 + `{ok:false,code,error}`） |
 | GET | `/dsh-video/api/asr/status?fresh=1` | 本地转写组件/引擎/模型状态 + `ocr`（画面文字识别）+ `vision`（画面理解/视觉模型能力）+ `privacy` 文案 + `hints` |
 | POST | `/dsh-video/api/asr/config` | `{enabled?,engine?,threads?,maxSeconds?,keepAudio?,autoTranscribe?,crossCheck?,ocrFallback?,ocrIntervalSeconds?,ocrMaxFrames?,frameSampling?:cuts\|uniform,cutThreshold?,frameMode?:auto\|ocr\|vision,visionModel?,visionMaxFrames?,visionPack?:sheet\|frames,sheetCols?}` → 新状态 |
+| GET | `/dsh-video/api/asr/models` | 本地模型（Whisper / SenseVoice）文件状态：每个文件的路径、期望/实际大小、是否存在 |
+| POST | `/dsh-video/api/asr/models` | SSE 下载模型：`{id:"whisper"\|"sensevoice"\|"all", force?}`，帧 `phase` / `progress{percent,received,total}` / `done` / `error{code}` |
 | POST | `/dsh-video/api/transcribe` | SSE：`{url?/docId?, force?}`，帧 `phase` / `progress{percent,stage}` / `done{docId,transcript,cached?}` / `error{code,message}`；无语音时自动兜底 OCR / 画面理解（stage 含 `vision`） |
 | POST | `/dsh-video/api/analyze` | SSE：`{mode:'summary'\|'ask', url?/docId?, question?, history?}`，帧 `phase` / `delta` / `done` / `error` |
 | POST | `/dsh-video/api/chapters` | `{url?/docId?}` → `{ok,value:{chapters:[{start,title,gist}],duration}}` |

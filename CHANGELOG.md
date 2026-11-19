@@ -2,6 +2,13 @@
 
 本项目的版本号与 `package.json` 保持一致；面板是单文件客户端，刷新页面即生效。
 
+## v0.11.1（2026-11-19）
+
+- 修复：Windows 上分析缓存文件名含 `:` 导致 `EINVAL rename` 失败（`youtube:xxx` 的缓存文件改成 `youtube_xxx.json`，旧文件自动兼容读取）。
+- 修复：分析缓存 JSON 里的 `docId` 与文件名不一致导致读取为空。
+- 新增：`GET /asr/models`、`POST /asr/models`（SSE）——本地模型状态与一键下载，支持自定义路径、进度与取消。
+- 改进：设置里可编辑 ffmpeg / yt-dlp / whisper-cli / sherpa-onnx / 模型路径；首页「环境准备」提示卡引导安装。
+
 ## v0.11.0（2026-11-19）
 
 多语言：

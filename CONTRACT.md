@@ -228,6 +228,38 @@ data: {"type":"error","message":"模型调用失败：…"}
 
 返回与 `GET /asr/status` 相同的 `value`（fresh）。
 
+`GET /asr/models`（本地模型文件状态；路径取 `asr.whisperModelPath` / `asr.sensevoiceModelPath` / `asr.sensevoiceTokensPath`，空串用 `~/.dsh/video-models/` 默认位置）：
+
+```json
+{ "ok": true, "value": {
+  "models": {
+    "whisper": { "id": "whisper", "label": "Whisper large-v3-turbo（q5_0，约 574 MB）", "available": true,
+      "files": [ { "key": "whisperModelPath", "path": "…/ggml-large-v3-turbo-q5_0.bin",
+                   "expectedBytes": 574041195, "actualBytes": 574041195, "exists": true } ] },
+    "sensevoice": { "id": "sensevoice", "label": "SenseVoice small（int8，约 240 MB）", "available": true,
+      "files": [ { "key": "sensevoiceModelPath", "path": "…/sensevoice/model.int8.onnx", "expectedBytes": 239233841, "actualBytes": 239233841, "exists": true },
+                 { "key": "sensevoiceTokensPath", "path": "…/sensevoice/tokens.txt", "expectedBytes": 315894, "actualBytes": 315894, "exists": true } ] }
+  },
+  "catalog": [ { "id": "whisper", "label": "Whisper large-v3-turbo（q5_0，约 574 MB）", "bytes": 574041195 },
+               { "id": "sensevoice", "label": "SenseVoice small（int8，约 240 MB）", "bytes": 239549735 } ]
+} }
+```
+
+`POST /asr/models`（SSE 下载；`id` ∈ `whisper` | `sensevoice` | `all`，已存在的文件跳过，`force: true` 重新下载；先写 `<文件>.part` 再 rename，Windows 上带退避重试）：
+
+```json
+{ "id": "whisper", "force": false }
+```
+
+```
+data: {"type":"phase","text":"开始下载模型：Whisper large-v3-turbo（q5_0，约 574 MB）"}
+data: {"type":"progress","stage":"download","model":"whisper","percent":42,"received":240000000,"total":574041195}
+data: {"type":"done","models":{…},"downloaded":[{"path":"…","bytes":574041195}]}
+data: {"type":"error","code":"model-download-failed","message":"…"}
+```
+
+错误码：`bad-model`、`model-download-failed`、`aborted`。
+
 `POST /transcribe`（SSE）：
 
 ```json

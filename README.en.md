@@ -5,7 +5,7 @@ English | [中文](./README.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#known-limitations)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.11.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.11.1-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -149,6 +149,30 @@ curl -s http://127.0.0.1:49269/dsh-video/api/status   # port = the actual GUI po
 ```
 
 The host half has zero external dependencies (only Node built-ins `fetch`/`crypto`), no lockfiles, no build step. Optional dependencies for local transcription / frame analysis: `brew install ffmpeg yt-dlp whisper.cpp` (see above).
+
+### Local components and models (optional)
+
+You only need these for videos without subtitles; if a video has captions, nothing has to be installed.
+
+| Component | Purpose | macOS | Windows |
+| --- | --- | --- | --- |
+| ffmpeg / ffprobe | frame extraction, wav conversion | `brew install ffmpeg` | `winget install Gyan.FFmpeg` |
+| yt-dlp | download audio / low-res video | `brew install yt-dlp` | `winget install yt-dlp.yt-dlp` |
+| whisper.cpp (`whisper-cli`) | local Whisper transcription | `brew install whisper.cpp` | download `whisper-bin-x64.zip` from [whisper.cpp releases](https://github.com/ggml-org/whisper.cpp/releases), unzip, and set the `whisper-cli.exe` path in settings |
+| sherpa-onnx | local SenseVoice transcription | download the macOS archive from [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases) and unzip to `~/.dsh/video-tools/sherpa-onnx` | same, Windows archive, same folder |
+
+Models live in `~/.dsh/video-models/` by default (`C:\Users\<you>\.dsh\video-models\` on Windows):
+
+- `ggml-large-v3-turbo-q5_0.bin` (~574 MB, Whisper)
+- `sensevoice/model.int8.onnx` + `sensevoice/tokens.txt` (~240 MB, SenseVoice)
+
+Three ways to get ready — pick one:
+
+1. **Click in the panel**: Settings → Local transcription → model card → Download (progress bar, `POST /dsh-video/api/asr/models`).
+2. **Download manually**: [Whisper model](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin) / [SenseVoice model](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/model.int8.onnx) + [tokens.txt](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/tokens.txt), put them in the folder above.
+3. **Use another location**: set `whisperModelPath` / `sensevoiceModelPath` / `sensevoiceTokensPath` in settings; binaries can be pointed to with `ffmpegPath` / `ytdlpPath` / `whisperBinaryPath` / `sherpaBinaryPath` (empty = default / PATH lookup).
+
+`GET /dsh-video/api/asr/models` shows whether each file exists and has the expected size.
 
 ## Same-origin API (used by the panel; curl-able)
 
