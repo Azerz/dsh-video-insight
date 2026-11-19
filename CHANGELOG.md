@@ -2,6 +2,14 @@
 
 本项目的版本号与 `package.json` 保持一致；面板是单文件客户端，刷新页面即生效。
 
+## v0.12.1 (2026-11-19)
+
+- **Windows 修复**：分析缓存/历史文件名不再含冒号（`youtube:` → `youtube_`），修复 Windows 上 `EINVAL: invalid argument, rename ...` 解析失败；旧缓存自动兼容读取，文件改名失败时退避重试。
+- **本机组件一键安装**：`GET /install/plan` + `POST /install`（SSE 进度/取消），设置里每项可「自动安装」，首页「环境准备」卡可一键装齐 ffmpeg / ffprobe / yt-dlp / Whisper / SenseVoice（macOS 上 Whisper 走 Homebrew 提示）。
+- **本地模型一键下载**：`GET /asr/models` + `POST /asr/models`，Whisper（574 MB）与 SenseVoice（≈240 MB）可直接下载到 `~/.dsh/video-models`。
+- **卸载安全**：插件热重载/升级时主动中止后台队列与打开的 SSE 连接，避免残留回调触发未处理的 rejection 让宿主退出。
+- **多语言**：界面跟随 DSH 语言、设置可切换；AI 输出按所选语言生成，分析缓存按语言隔离（0.11.0/0.11.1 内容一并包含在本版）。
+
 ## v0.12.0（2026-11-19）
 
 - 新增：**本机组件一键安装**（`GET /install/plan`、`POST /install` SSE）——ffmpeg / ffprobe / yt-dlp / whisper-cli（Windows）/ sherpa-onnx 直接下载便携版到 `~/.dsh/video-tools/`，装完自动写回路径配置，不用再手动填。
