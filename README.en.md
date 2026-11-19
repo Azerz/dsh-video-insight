@@ -1,6 +1,6 @@
 # dsh-video-insight · Video Insight
 
-**English** | [中文](./README.md)
+[English](./README.en.md) | [中文](./README.md)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
