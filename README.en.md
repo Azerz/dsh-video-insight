@@ -286,6 +286,21 @@ The cookie and local-transcription settings saved from the panel go to `~/.dsh/v
 - Storyboard: max 2 sheets / 48 cells; the first run downloads 480p and scans cuts (10–20 s for a 10-minute video); the video and cut list are cached in `~/.dsh/video-assets/` (max 8 videos / 2 GB / 30 days) and reused, so regeneration takes ~1 s; "describe" sends frames to the vision model.
 - Only single links — no playlists or collections.
 
+## Automated releases (GitHub Actions)
+
+Pushing a `v*` tag runs tests and publishes to npm automatically (npm Trusted Publishing over OIDC — no `NPM_TOKEN`):
+
+```bash
+npm version patch --no-git-tag-version
+git commit -am "chore: release vX.Y.Z"
+git tag vX.Y.Z
+git push origin main vX.Y.Z              # triggers .github/workflows/release.yml
+```
+
+One-time setup: npmjs.com → the package → Settings → Trusted Publisher → add GitHub Actions with repo `Azerz/dsh-video-insight` and workflow `release.yml`.
+
+Regular pushes / PRs run `.github/workflows/ci.yml` (syntax check + client tests + `npm pack --dry-run`).
+
 ## Development
 
 ```bash

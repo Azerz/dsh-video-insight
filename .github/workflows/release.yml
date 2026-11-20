@@ -1,0 +1,38 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # 建 GitHub Release
+  id-token: write   # npm Trusted Publishing（OIDC，无需 NPM_TOKEN）
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Version must match the tag
+        run: |
+          node -e "const p=require('./package.json');const t=process.env.GITHUB_REF_NAME.replace(/^v/,'');if(p.version!==t){console.error('package.json version '+p.version+' != tag '+t);process.exit(1)}"
+
+      - name: Syntax check (host + client)
+        run: |
+          for f in lib/*.js; do node --check "$f"; done
+          node --check client/client.js
+
+      - name: Client tests
+        run: node test/client.test.mjs
+
+      - name: Publish to npm (trusted publishing)
+        run: npm publish --access public --provenance
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes || echo "release already exists"

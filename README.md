@@ -307,6 +307,21 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 - 分镜：最多 2 张拼图 / 48 格（20 分钟片子约 46 格），第一次生成要下 480p + 跑一遍切点扫描（10 分钟片子约 10–20 秒）；低清视频与切点会按视频缓存（`~/.dsh/video-assets/`，最多 8 个 / 2GB / 30 天），之后转写、画面理解、分镜都复用，重新生成约 1 秒；「附画面描述」会调用视觉模型，图片会离开本机。
 - 只支持单条链接，不做播放列表 / 合集递归。
 
+## 自动发布（GitHub Actions）
+
+推一个 `v*` tag 就会自动跑测试并发布到 npm（npm Trusted Publishing，OIDC，不需要 `NPM_TOKEN`）：
+
+```bash
+npm version patch --no-git-tag-version   # 或手动改版本号
+git commit -am "chore: release vX.Y.Z"
+git tag vX.Y.Z
+git push origin main vX.Y.Z              # 触发 .github/workflows/release.yml
+```
+
+前置条件（只需在 npm 网页设置一次）：npmjs.com → 你的包 → Settings → Trusted Publisher → 添加 GitHub Actions，仓库填 `Azerz/dsh-video-insight`、workflow 填 `release.yml`。
+
+普通 push / PR 会跑 `.github/workflows/ci.yml`（语法检查 + 客户端测试 + `npm pack --dry-run`）。
+
 ## 开发与自测
 
 ```bash
