@@ -2,6 +2,11 @@
 
 本项目的版本号与 `package.json` 保持一致；面板是单文件客户端，刷新页面即生效。
 
+## v0.12.2 (2026-11-20)
+
+- 发布流程改为 GitHub Actions：推 `v*` tag 自动跑测试、`npm publish --provenance`（npm Trusted Publishing，OIDC，无需 token）并创建 GitHub Release。
+- 新增日常 CI：push / PR 跑语法检查、客户端测试与 `npm pack --dry-run`。
+
 ## v0.12.1 (2026-11-19)
 
 - **Windows 修复**：分析缓存/历史文件名不再含冒号（`youtube:` → `youtube_`），修复 Windows 上 `EINVAL: invalid argument, rename ...` 解析失败；旧缓存自动兼容读取，文件改名失败时退避重试。

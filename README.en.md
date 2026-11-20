@@ -5,7 +5,7 @@ English | [中文](./README.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#known-limitations)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.12.1-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.12.2-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
