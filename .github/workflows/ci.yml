@@ -21,8 +21,11 @@ jobs:
         run: |
           for f in lib/*.js; do node --check "$f"; done
           node --check client/client.js
-      - name: Client tests
-        run: node test/client.test.mjs
+      - name: Tests (client / bilibili / installer / storage)
+        run: |
+          node test/client.test.mjs
           node test/bilibili.test.mjs
+          node test/installer.test.mjs
+          node test/storage.test.mjs
       - name: Package dry-run
         run: npm pack --dry-run

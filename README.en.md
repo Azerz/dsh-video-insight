@@ -5,7 +5,7 @@ English | [中文](./README.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#known-limitations)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.12.3-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.12.4-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -158,8 +158,10 @@ You only need these for videos without subtitles; if a video has captions, nothi
 | --- | --- | --- | --- |
 | ffmpeg / ffprobe | frame extraction, wav conversion | `brew install ffmpeg` | `winget install Gyan.FFmpeg` |
 | yt-dlp | download audio / low-res video | `brew install yt-dlp` | `winget install yt-dlp.yt-dlp` |
-| whisper.cpp (`whisper-cli`) | local Whisper transcription | `brew install whisper.cpp` | download `whisper-bin-x64.zip` from [whisper.cpp releases](https://github.com/ggml-org/whisper.cpp/releases), unzip, and set the `whisper-cli.exe` path in settings |
+| whisper.cpp (`whisper-cli`) | local Whisper transcription | `brew install whisper.cpp` | grab the right build from [whisper.cpp releases](https://github.com/ggml-org/whisper.cpp/releases) (CPU by default, CUDA if you have an NVIDIA GPU), unzip and set the `whisper-cli.exe` path in settings — or click Install in settings |
 | sherpa-onnx | local SenseVoice transcription | download the macOS archive from [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases) and unzip to `~/.dsh/video-tools/sherpa-onnx` | same, Windows archive, same folder |
+
+**Which whisper build on Windows?** The panel reads your GPU name and recommends one: Settings → Local tools → "Whisper backend" offers `Auto (detect GPU)` / `CPU` / `NVIDIA CUDA 12.4` / `NVIDIA CUDA 11.8` (arm64 also CUDA 13.5 / OpenCL). Model files are the same for every backend — only the `whisper-cli` binary changes; the CUDA build needs an NVIDIA GPU and the matching CUDA runtime. To check what is in use, run `whisper-cli -m <model> -f <wav>` and look for `load_backend: loaded CUDA backend` vs `loaded CPU backend`.
 
 Models live in `~/.dsh/video-models/` by default (`C:\Users\<you>\.dsh\video-models\` on Windows):
 
@@ -181,7 +183,14 @@ Three ways to get ready — pick one:
 | GET | `/dsh-video/api/status` | `{ok,value:{version,model,bilibili:{cookie},platforms,transcriptLimitChars,asr:{enabled,ready,engine,activeEngine,engineLabel,downloadReady}}}` |
 | GET | `/dsh-video/api/resolve?url=&force=1` | Resolve a link → `VideoDoc` (failures are still HTTP 200 with `{ok:false,code,error}`) |
 | GET | `/dsh-video/api/asr/status?fresh=1` | Local-transcription toolchain/engines/models + `ocr` (frame OCR) + `vision` (vision-model capability) + `privacy` text + `hints` |
-| POST | `/dsh-video/api/asr/config` | `{enabled?,engine?,threads?,maxSeconds?,keepAudio?,autoTranscribe?,crossCheck?,ocrFallback?,ocrIntervalSeconds?,ocrMaxFrames?,frameSampling?:cuts\|uniform,cutThreshold?,frameMode?:auto\|ocr\|vision,visionModel?,visionMaxFrames?,visionPack?:sheet\|frames,sheetCols?}` → new status |
+| POST | `/dsh-video/api/asr/config` | `{enabled?,engine?,threads?,maxSeconds?,keepAudio?,autoTranscribe?,crossCheck?,ocrFallback?,ocrIntervalSeconds?,ocrMaxFrames?,frameSampling?:cuts\|uniform,cutThreshold?,frameMode?:auto\|ocr\|vision,visionModel?,visionMaxFrames?,visionPack?:sheet\|frames,sheetCols?,whisperBackend?:auto\|cpu\|cuda-12.4\|cuda-11.8\|cuda-13.5\|opencl}` → new status |
+| GET | `/dsh-video/api/asr/models` | Model files: `{models,catalog}` (exists / expected bytes per file) |
+| POST | `/dsh-video/api/asr/models` | SSE download: `{id?:'whisper'\|'sensevoice', force?}`; frames `phase` / `progress{stage:'download',model,percent,received,total}` / `done{models,downloaded}` / `error{code}` |
+| GET | `/dsh-video/api/storage` | Local cache overview: `files`/`bytes`/retention per kind + read-only model/tool sizes + `lastPrunedAt` |
+| POST | `/dsh-video/api/storage/clear` | `{kind:\"assets\"\|\"storyboards\"\|\"transcripts\"\|\"analyses\"\|\"outlines\"\|\"translations\"\|\"all\"}` → wipe that cache and return the new overview |
+| POST | `/dsh-video/api/storage/prune` | Run an expiry pass now (bypasses the 6-hour throttle) |
+| GET | `/dsh-video/api/install/plan` | Local tools (ffmpeg/ffprobe/yt-dlp/whisper-cli/sherpa-onnx): installed?, method, expected bytes; plus `gpus` (Windows GPUs), `suggested` (recommended whisper backend) and whisper's `variants`/`backend`/`activeBackend` |
+| POST | `/dsh-video/api/install` | SSE install: `{id:'ffmpeg'\|'ffprobe'\|'ytdlp'\|'whisper'\|'sherpa'\|'all', backend?}` (`backend` for whisper only: `auto`\|`cpu`\|`cuda-12.4`\|`cuda-11.8`\|`cuda-13.5`\|`opencl`); frames `phase` / `progress{component,stage,percent}` / `installed{component,path,backend?}` / `done` / `error{code}` |
 | POST | `/dsh-video/api/transcribe` | SSE: `{url?/docId?, force?}`; frames `phase` / `progress{percent,stage}` / `done{docId,transcript,cached?}` / `error{code,message}`; falls back to OCR / frame understanding automatically |
 | POST | `/dsh-video/api/analyze` | SSE: `{mode:'summary'\|'ask', url?/docId?, question?, history?}`; frames `phase` / `delta` / `done` / `error` |
 | POST | `/dsh-video/api/chapters` | `{url?/docId?}` → `{ok,value:{chapters:[{start,title,gist}],duration}}` |
@@ -268,6 +277,22 @@ The cookie and local-transcription settings saved from the panel go to `~/.dsh/v
 - **Override in Settings**: Settings → Language, choose "Follow DSH / 中文 / English"; the change applies immediately (stored locally as `dsh-video.lang`).
 - **AI output in that language**: summaries, follow-ups, chapters, mind map and frame descriptions are generated in the current language; Chinese and English have full templates and section headings, other languages use the English template plus an explicit target-language instruction.
 - **Caches are per language**: a Chinese summary and an English summary of the same video are cached separately, so switching languages never shows stale content in the other language.
+
+## Storage & cleanup
+
+Everything is cached under `~/.dsh/`; Settings → Storage shows the size of each kind and lets you clear them individually:
+
+| Folder | Contents | Auto-prune |
+| --- | --- | --- |
+| `video-assets/` | low-res video, cut points, chapter thumbnails | latest 8 videos / 2 GiB total / 30 days |
+| `video-storyboards/` | storyboard sheets | latest 60 videos / 90 days |
+| `video-transcripts/` | local transcripts / OCR / frame descriptions | 90 days |
+| `video-analyses/` | summary / chapters / mindmap / chat | 90 days |
+| `video-outlines/` | chapter visuals | 90 days |
+| `video-translations/` | translations | 90 days |
+| `video-models/`, `video-tools/` | models and binaries | never pruned (expensive to re-download) |
+
+Pruning is lazy: once 5 seconds after startup, then at most every 6 hours; you can also hit "Prune expired now". Removing a history entry does not delete the on-disk cache — use Storage for that.
 
 ## Known limitations
 

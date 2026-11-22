@@ -866,6 +866,33 @@ const INSTALL_PLAN = {
     { id: 'sherpa', label: 'sherpa-onnx', method: 'download', bytes: 246000000, platform: 'darwin-arm64', hint: '', installed: true, detectedPath: '/Users/test/.dsh/video-tools/sherpa-onnx/bin/sherpa-onnx-offline' },
   ],
 };
+const STORAGE_FIXTURE = [
+  ['assets', 168 * 1024 * 1024, 12],
+  ['storyboards', 17 * 1024 * 1024, 68],
+  ['transcripts', 228 * 1024, 12],
+  ['analyses', 468 * 1024, 41],
+  ['outlines', 60 * 1024, 9],
+  ['translations', 12 * 1024, 1],
+];
+function storageValue(clearedKind) {
+  const cleared = (id) => clearedKind === 'all' || clearedKind === id;
+  const kinds = STORAGE_FIXTURE.map(([id, bytes, files]) => ({
+    id, dir: `/tmp/${id}`, keepDays: 90, keepCount: 0,
+    bytes: cleared(id) ? 0 : bytes, files: cleared(id) ? 0 : files, newestAt: 0, oldestAt: 0,
+  }));
+  return {
+    kinds,
+    readonly: [
+      { id: 'models', dir: '/tmp/models', bytes: 776 * 1024 * 1024, files: 3, newestAt: 0, oldestAt: 0 },
+      { id: 'tools', dir: '/tmp/tools', bytes: 853 * 1024 * 1024, files: 46, newestAt: 0, oldestAt: 0 },
+    ],
+    totalBytes: kinds.reduce((sum, item) => sum + item.bytes, 0),
+    totalFiles: kinds.reduce((sum, item) => sum + item.files, 0),
+    lastPrunedAt: 0,
+    policy: { pruneIntervalHours: 6 },
+  };
+}
+let storageCleared = '';
 let installPlanValue = null;
 let installMode = 'ok';
 
@@ -923,16 +950,26 @@ function resetRoutes() {
     'asr/config': (call) => {
       const body = call.body || {};
       for (const key of ['enabled', 'engine']) if (key in body) ASR[key] = body[key];
+      if ('whisperBackend' in body) {
+        ASR.config.whisperBackend = body.whisperBackend;
+        if (asrStatusOverride && asrStatusOverride.config) asrStatusOverride.config.whisperBackend = body.whisperBackend;
+      }
       for (const key of ['threads', 'maxSeconds', 'keepAudio', 'autoTranscribe', 'crossCheck', 'ocrFallback', 'ocrIntervalSeconds', 'ocrMaxFrames', 'frameMode', 'visionModel', 'visionMaxFrames', 'ffmpegPath', 'ytdlpPath', 'whisperBinaryPath', 'sherpaBinaryPath', 'whisperModelPath', 'sensevoiceModelPath', 'sensevoiceTokensPath']) {
         if (key in body) ASR.config[key] = body[key];
       }
       if (ASR.vision && ASR.vision.config) {
         for (const key of ['frameMode', 'visionModel', 'visionMaxFrames']) if (key in body) ASR.vision.config[key] = body[key];
       }
-      return { ok: true, value: ASR };
+      return { ok: true, value: asrStatusOverride || ASR };
     },
     'asr/config/_:unused': () => ({ ok: true, value: ASR }),
     'install/plan': () => ({ ok: true, value: installPlanValue || INSTALL_PLAN }),
+    storage: () => ({ ok: true, value: storageValue(storageCleared) }),
+    'storage/clear': (call) => {
+      storageCleared = String((call.body || {}).kind || 'all');
+      return { ok: true, value: { removed: 68, freedBytes: 17 * 1024 * 1024, status: storageValue(storageCleared) } };
+    },
+    'storage/prune': () => ({ ok: true, value: { skipped: false, removed: 3, freedBytes: 4096, status: storageValue(storageCleared) } }),
     install: (call) => {
       if (installMode === 'slow') {
         return { __sseSlow: [{ type: 'phase', text: '正在下载 yt-dlp…' }, { type: 'progress', stage: 'download', component: 'ytdlp', percent: null, received: 1024, total: 0 }] };
@@ -2534,6 +2571,27 @@ const autoInstallBtns = findAll(tree, (node) => node.__host === 'element' && nod
 check('task30 未装组件显示自动安装', autoInstallBtns.length >= 1);
 check('task30 brew 组件显示用 Homebrew 安装', Boolean(buttonByText(tree, '用 Homebrew 安装')));
 checkIncludes('task30 brew 组件提示需要 Homebrew', asrBoxText(), '需要本机已安装 Homebrew');
+checkIncludes('mac 上显示 whisper 后端说明（Homebrew 构建）', asrBoxText(), 'Homebrew 构建');
+check('mac 上不显示 whisper 后端下拉', findAll(tree, (node) => node.__host === 'element' && node.tag === 'select' && String(node.props['aria-label'] || '').includes('whisper 后端')).length === 0);
+
+// 存储管理
+storageCleared = '';
+checkIncludes('storage 设置里有存储管理', nodeText(tree), '存储管理');
+checkIncludes('storage 列出低清视频', nodeText(tree), '低清视频与缩略图');
+checkIncludes('storage 显示分镜体积', nodeText(tree), '17 MB');
+const storageClearBtns = findAll(tree, (node) => node.__host === 'element' && node.tag === 'button' && nodeText(node) === '清理');
+check('storage 六类缓存各有清理按钮', storageClearBtns.length === 6);
+click(storageClearBtns[1]);
+tree = await settle(10);
+const confirmStorage = findAll(tree, (node) => node.__host === 'element' && node.tag === 'button' && nodeText(node) === '确认清理？');
+check('storage 清理需要二次确认', confirmStorage.length === 1);
+click(confirmStorage[0]);
+tree = await settle(30);
+check('storage 清理分镜提交 kind=storyboards', (lastCallOf('storage/clear')?.body || {}).kind === 'storyboards');
+checkIncludes('storage 清理后分镜变 0 个文件', nodeText(tree), '0 个文件');
+clickText(tree, '立即清理过期缓存');
+tree = await settle(20);
+check('storage 立即清理调用 prune', callsOf('storage/prune').length >= 1);
 
 const planCallsBefore = callsOf('install/plan').length;
 const asrCallsBefore = callsOf('asr/status').length;
@@ -2580,6 +2638,55 @@ asrStatusOverride = null;
 installPlanValue = null;
 if (!clickText(tree, '关闭')) clickText(tree, 'Close');
 tree = await settle(30);
+
+/* -------------------------------------------- whisper 后端选择（Windows 显卡） */
+asrStatusOverride = JSON.parse(JSON.stringify(ASR));
+asrStatusOverride.tools.platform = 'win32-x64';
+asrStatusOverride.tools.whisper.available = false;
+asrStatusOverride.tools.whisper.path = '';
+installPlanValue = {
+  platform: 'win32-x64',
+    gpus: ['NVIDIA GeForce RTX 4070'],
+    suggested: 'cuda-12.4',
+    plan: [
+      { id: 'ffmpeg', label: 'ffmpeg', method: 'download', bytes: 29000000, platform: 'win32-x64', hint: '', installed: true, detectedPath: 'C:/tools/ffmpeg.exe' },
+      { id: 'ffprobe', label: 'ffprobe', method: 'download', bytes: 29000000, platform: 'win32-x64', hint: '', installed: true, detectedPath: 'C:/tools/ffprobe.exe' },
+      { id: 'ytdlp', label: 'yt-dlp', method: 'download', bytes: 37000000, platform: 'win32-x64', hint: '', installed: true, detectedPath: 'C:/tools/yt-dlp.exe' },
+      {
+        id: 'whisper', label: 'whisper-cli', method: 'download', bytes: 8000000, platform: 'win32-x64', hint: '',
+        installed: false, detectedPath: '', backend: 'auto', activeBackend: 'cuda-12.4',
+        variants: [
+          { id: 'cpu', label: 'CPU（AVX2 / AVX512）', asset: 'whisper-bin-x64.zip', bytes: 8000000, note: '所有机器都能用，速度最慢' },
+          { id: 'cuda-12.4', label: 'NVIDIA CUDA 12.4', asset: 'whisper-bin-win-cuda-12.4.0-x64.zip', bytes: 250000000, note: '需要 NVIDIA 显卡与 CUDA 12.4 运行库' },
+          { id: 'cuda-11.8', label: 'NVIDIA CUDA 11.8', asset: 'whisper-bin-win-cuda-11.8.0-x64.zip', bytes: 250000000, note: '老驱动/老 CUDA 环境选这个' },
+        ],
+      },
+    { id: 'sherpa', label: 'sherpa-onnx', method: 'download', bytes: 240000000, platform: 'win32-x64', hint: '', installed: true, detectedPath: 'C:/tools/sherpa-onnx-offline.exe' },
+  ],
+};
+installMode = 'ok';
+if (!clickText(tree, '设置')) clickText(tree, 'Settings');
+tree = await settle(40);
+await recheckAsr();
+const backendSelect = findAll(tree, (node) => node.__host === 'element' && node.tag === 'select'
+  && String(node.props['aria-label'] || '').includes('whisper 后端'))[0];
+check('whisper 后端下拉存在', Boolean(backendSelect));
+check('后端下拉包含 CUDA 选项', Boolean(backendSelect) && nodeText(backendSelect).includes('NVIDIA CUDA 12.4'));
+checkIncludes('显示检测到的显卡', asrBoxText(), 'NVIDIA GeForce RTX 4070');
+checkIncludes('显示推荐后端', asrBoxText(), '推荐后端');
+change(backendSelect, 'cuda-12.4');
+tree = await settle(30);
+check('切换 whisper 后端写入配置', String((lastCallOf('asr/config')?.body || {}).whisperBackend) === 'cuda-12.4');
+const winInstallBtns = findAll(tree, (node) => node.__host === 'element' && node.tag === 'button' && nodeText(node) === '自动安装');
+check('Windows 只给未装的 whisper 显示自动安装', winInstallBtns.length === 1);
+click(winInstallBtns[0]);
+tree = await settle(30);
+const winInstallBody = lastCallOf('install')?.body || {};
+check('安装 whisper 时带上后端', winInstallBody.id === 'whisper' && winInstallBody.backend === 'cuda-12.4');
+if (!clickText(tree, '关闭')) clickText(tree, 'Close');
+tree = await settle(30);
+asrStatusOverride = null;
+installPlanValue = null;
 
 check('渲染期间没有运行时异常', runtimeErrors.length === 0);
 if (runtimeErrors.length) console.log(`运行时异常：\n${runtimeErrors.slice(0, 3).join('\n')}`);

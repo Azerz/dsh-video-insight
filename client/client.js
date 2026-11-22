@@ -301,6 +301,40 @@ window.__ModuleLoader__.load({
       'asr.comp.all': ['全部自动安装', 'Install all'],
       'asr.comp.install': ['自动安装', 'Install'],
       'asr.comp.brewInstall': ['用 Homebrew 安装', 'Install via Homebrew'],
+      'asr.comp.whisperBackend': ['whisper 后端', 'Whisper backend'],
+      'asr.comp.whisperAuto': ['自动（按显卡推荐）', 'Auto (detect GPU)'],
+      'asr.comp.gpuDetected': ['检测到显卡：{gpus}', 'Detected GPU: {gpus}'],
+      'asr.comp.gpuSuggested': ['推荐后端：{backend}', 'Suggested backend: {backend}'],
+      'asr.comp.gpuNone': ['没有检测到独立显卡，默认用 CPU 构建', 'No discrete GPU detected, using the CPU build'],
+      'asr.comp.whisperBackendMac': ['whisper 后端：Homebrew 构建（自动用 Metal/CPU，无需选择）', 'Whisper backend: Homebrew build (Metal/CPU automatically, nothing to choose)'],
+      'asr.comp.whisperBackendWinOnly': ['CPU / CUDA 构建的选择只在 Windows 上提供', 'CPU / CUDA build selection is Windows only'],
+      'settings.storageTitle': ['存储管理', 'Storage'],
+      'settings.storageDesc': ['缓存都在 ~/.dsh 下，按最近使用自动清理：低清视频保留最近 8 个 / 30 天，分镜保留最近 60 个视频 / 90 天，其余 90 天。', 'Caches live under ~/.dsh and are pruned by last use: low-res videos keep the latest 8 / 30 days, storyboards the latest 60 videos / 90 days, everything else 90 days.'],
+      'settings.storageFiles': ['{n} 个文件', '{n} files'],
+      'settings.storageClear': ['清理', 'Clear'],
+      'settings.storageConfirm': ['确认清理？', 'Clear?'],
+      'settings.storageAll': ['全部清理', 'Clear all'],
+      'settings.storagePrune': ['立即清理过期缓存', 'Prune expired now'],
+      'settings.storagePruned': ['已清理 {n} 个文件，释放 {size}', 'Removed {n} files, freed {size}'],
+      'settings.storageKeep': ['不自动清理', 'Never auto-pruned'],
+      'settings.storageTotal': ['合计 {size}', 'Total {size}'],
+      'settings.storagePruneNone': ['没有需要清理的过期缓存', 'Nothing to prune'],
+      'common.clearing': ['清理中…', 'Clearing…'],
+      'settings.storageLast': ['上次自动清理：{time}', 'Last auto-prune: {time}'],
+      'settings.kind.assets': ['低清视频与缩略图', 'Low-res video & thumbnails'],
+      'settings.kind.storyboards': ['分镜拼图', 'Storyboard sheets'],
+      'settings.kind.transcripts': ['本地转写稿', 'Local transcripts'],
+      'settings.kind.analyses': ['分析缓存（总结/章节/导图/对话）', 'Analysis cache (summary/chapters/mindmap/chat)'],
+      'settings.kind.outlines': ['章节画面描述', 'Chapter visuals'],
+      'settings.kind.translations': ['双语翻译稿', 'Translations'],
+      'settings.kind.models': ['模型文件', 'Model files'],
+      'settings.kind.tools': ['本机组件', 'Local tools'],
+      'asr.comp.whisperHint': ['模型文件与后端无关；换后端只是换 whisper-cli 二进制。CUDA 构建需要 NVIDIA 显卡和对应 CUDA 运行库。', 'The model file is the same; only the whisper-cli binary changes. The CUDA build needs an NVIDIA GPU and matching CUDA runtime.'],
+      'asr.comp.backendCpu': ['CPU', 'CPU'],
+      'asr.comp.backendCuda124': ['NVIDIA CUDA 12.4', 'NVIDIA CUDA 12.4'],
+      'asr.comp.backendCuda118': ['NVIDIA CUDA 11.8', 'NVIDIA CUDA 11.8'],
+      'asr.comp.backendCuda135': ['NVIDIA CUDA 13.5', 'NVIDIA CUDA 13.5'],
+      'asr.comp.backendOpencl': ['OpenCL（Adreno 核显）', 'OpenCL (Adreno iGPU)'],
       'asr.comp.brewHint': ['需要本机已安装 Homebrew；也可以直接在上面填路径', 'Needs Homebrew on this machine; you can also type a path above'],
       'asr.comp.installing': ['安装中…', 'Installing…'],
       'asr.comp.extracting': ['正在解压…', 'Extracting…'],
@@ -3177,6 +3211,18 @@ window.__ModuleLoader__.load({
         h('input', { key: 'c', type: 'checkbox', checked: Boolean(config.keepAudio), onChange: () => onConfig({ keepAudio: !config.keepAudio }) }),
         h('span', { key: 't' }, t('asr.keepAudio')),
       ]));
+      const isWinPlatform = /win/i.test(String(tools.platform || ''));
+      const whisperEntry = (plan && Array.isArray(plan.plan) ? plan.plan : []).find((item) => item && item.id === 'whisper') || null;
+      const whisperVariants = Array.isArray(whisperEntry?.variants) ? whisperEntry.variants : [];
+      const whisperBackendValue = String(config.whisperBackend || 'auto');
+      const gpus = Array.isArray(plan?.gpus) ? plan.gpus.filter(Boolean) : [];
+      const suggestedBackend = String(plan?.suggested || '');
+      const backendLabel = (id) => {
+        const keys = { cpu: 'asr.comp.backendCpu', 'cuda-12.4': 'asr.comp.backendCuda124', 'cuda-11.8': 'asr.comp.backendCuda118', 'cuda-13.5': 'asr.comp.backendCuda135', opencl: 'asr.comp.backendOpencl' };
+        if (keys[id]) return t(keys[id]);
+        const variant = whisperVariants.find((item) => item && item.id === id);
+        return variant ? String(variant.label || id) : String(id);
+      };
       const installList = plan && Array.isArray(plan.plan) ? plan.plan : [];
       const planEntry = (key) => installList.find((item) => item && item.id === key) || null;
       const busyId = installing && installing.loading ? String(installing.id || '') : '';
@@ -3195,7 +3241,7 @@ window.__ModuleLoader__.load({
         h('button', {
           key: 'all', type: 'button', className: 'dvv-btn dvv-btn-sm',
           disabled: Boolean(busyId),
-          onClick: () => { if (onInstallAll) onInstallAll(); },
+          onClick: () => { if (onInstallAll) onInstallAll(whisperBackendValue); },
         }, t('asr.comp.all')),
         h('button', { key: 'r', type: 'button', className: 'dvv-btn dvv-btn-sm', onClick: () => { if (onRefresh) onRefresh(); } }, t('asr.comp.refresh')),
       ]));
@@ -3220,7 +3266,7 @@ window.__ModuleLoader__.load({
             key: 'inst', type: 'button', className: 'dvv-btn dvv-btn-sm',
             disabled: Boolean(busyId) || Boolean(saving),
             title: isBrew ? t('asr.comp.brewHint') : '',
-            onClick: () => { if (onInstall) onInstall(key); },
+            onClick: () => { if (onInstall) onInstall(key, whisperBackendValue); },
           }, isBrew ? t('asr.comp.brewInstall') : t('asr.comp.install')));
         }
         rows.push(h('div', { key: `tool-${key}`, className: 'dvv-path-line' }, cells));
@@ -3228,6 +3274,34 @@ window.__ModuleLoader__.load({
           rows.push(h('div', { key: `brew-${key}`, className: 'dvv-note' }, t('asr.comp.brewHint')));
         }
         if (busy) rows.push(installProgress(key));
+        if (key === 'whisper' && isWinPlatform && whisperVariants.length > 0) {
+          rows.push(h('div', { key: 'whisper-backend', className: 'dvv-asr-row' }, [
+            h('span', { key: 'l', className: 'dvv-label' }, t('asr.comp.whisperBackend')),
+            h('select', {
+              key: 's', className: 'dvv-select', value: whisperBackendValue, 'aria-label': t('asr.comp.whisperBackend'),
+              onChange: (event) => { if (onConfig) onConfig({ whisperBackend: String(event.target.value) }); },
+            }, [
+              h('option', { key: 'auto', value: 'auto' }, t('asr.comp.whisperAuto')),
+              ...whisperVariants.map((variant) => h('option', {
+                key: variant.id, value: variant.id, title: String(variant.note || ''),
+              }, backendLabel(variant.id))),
+            ]),
+            h('span', { key: 'cur', className: 'dvv-note' }, gpus.length
+              ? t('asr.comp.gpuDetected', { gpus: gpus.join(' / ') })
+              : t('asr.comp.gpuNone')),
+          ]));
+          if (suggestedBackend) {
+            rows.push(h('div', { key: 'whisper-suggest', className: 'dvv-note' }, t('asr.comp.gpuSuggested', { backend: backendLabel(suggestedBackend) })));
+          }
+          rows.push(h('div', { key: 'whisper-hint', className: 'dvv-note' }, t('asr.comp.whisperHint')));
+        }
+        if (key === 'whisper' && !isWinPlatform) {
+          rows.push(h('div', { key: 'whisper-backend-mac', className: 'dvv-asr-row' }, [
+            h('span', { key: 'l', className: 'dvv-label' }, t('asr.comp.whisperBackend')),
+            h('span', { key: 'v', className: 'dvv-note' }, t('asr.comp.whisperBackendMac')),
+          ]));
+          rows.push(h('div', { key: 'whisper-backend-winonly', className: 'dvv-note' }, t('asr.comp.whisperBackendWinOnly')));
+        }
       });
       rows.push(h(AsrModelsBlock, {
         key: 'model-cards', models: models || null, error: modelsError || '',
@@ -3251,7 +3325,73 @@ window.__ModuleLoader__.load({
 
     /* -------------------------------------------------------------- 设置弹层 */
 
-    function SettingsModal({ status, cookie, saving, note, onCookie, onSave, onClear, onClose, onRefresh, asr, asrSaving, asrNote, asrError, onAsrConfig, doc, onClearAnalysis, onClearChat, lang, onLang, asrModels, asrModelsError, modelDownloading, onDownloadModel, onCancelDownload, onRefreshAsr, asrPlan, installPlanError, installJob, onInstallComponent, onCancelInstall }) {
+    const STORAGE_KIND_KEYS = {
+      assets: 'settings.kind.assets',
+      storyboards: 'settings.kind.storyboards',
+      transcripts: 'settings.kind.transcripts',
+      analyses: 'settings.kind.analyses',
+      outlines: 'settings.kind.outlines',
+      translations: 'settings.kind.translations',
+      models: 'settings.kind.models',
+      tools: 'settings.kind.tools',
+    };
+
+    function StorageSection({ storage, loading, error, busy, onRefresh, onClear, onPrune }) {
+      const [confirm, setConfirm] = useState('');
+      const kinds = storage && Array.isArray(storage.kinds) ? storage.kinds : [];
+      const readonly = storage && Array.isArray(storage.readonly) ? storage.readonly : [];
+      const rows = [];
+      kinds.forEach((item) => {
+        const confirmed = confirm === item.id;
+        const clearing = busy === item.id;
+        rows.push(h('div', { key: `st-${item.id}`, className: 'dvv-storage-row' }, [
+          h('span', { key: 'l', className: 'dvv-label' }, t(STORAGE_KIND_KEYS[item.id] || 'settings.storageTitle')),
+          h('span', { key: 's', className: 'dvv-note' }, `${fmtBytes(item.bytes || 0)} · ${t('settings.storageFiles', { n: item.files || 0 })}`),
+          h('button', {
+            key: 'b', type: 'button', className: 'dvv-btn dvv-btn-sm', disabled: Boolean(busy) || clearing,
+            onClick: () => {
+              if (confirmed) { setConfirm(''); if (onClear) onClear(item.id); return; }
+              setConfirm(item.id);
+              setTimeout(() => setConfirm((cur) => (cur === item.id ? '' : cur)), 3000);
+            },
+          }, clearing ? t('common.clearing') : confirmed ? t('settings.storageConfirm') : t('settings.storageClear')),
+        ]));
+      });
+      readonly.forEach((item) => {
+        rows.push(h('div', { key: `st-${item.id}`, className: 'dvv-storage-row' }, [
+          h('span', { key: 'l', className: 'dvv-label' }, t(STORAGE_KIND_KEYS[item.id] || item.id)),
+          h('span', { key: 's', className: 'dvv-note' }, `${fmtBytes(item.bytes || 0)} · ${t('settings.storageKeep')}`),
+        ]));
+      });
+      const total = storage ? Number(storage.totalBytes || 0) : 0;
+      const confirmAll = confirm === 'all';
+      return h('div', { key: 'storage', className: 'dvv-field' }, [
+        h('div', { key: 'head', className: 'dvv-asr-head' }, [
+          h('span', { key: 't', className: 'dvv-label' }, t('settings.storageTitle')),
+          h('span', { key: 'sp', className: 'dvv-asr-spacer' }),
+          h('button', { key: 'r', type: 'button', className: 'dvv-btn dvv-btn-sm', disabled: Boolean(busy), onClick: () => { if (onRefresh) onRefresh(); } }, t('common.refresh')),
+          h('button', {
+            key: 'p', type: 'button', className: 'dvv-btn dvv-btn-sm', disabled: Boolean(busy),
+            onClick: () => { if (onPrune) onPrune(); },
+          }, busy === 'prune' ? t('common.clearing') : t('settings.storagePrune')),
+          h('button', {
+            key: 'all', type: 'button', className: 'dvv-btn dvv-btn-sm', disabled: Boolean(busy) || !kinds.length,
+            onClick: () => {
+              if (confirmAll) { setConfirm(''); if (onClear) onClear('all'); return; }
+              setConfirm('all');
+              setTimeout(() => setConfirm((cur) => (cur === 'all' ? '' : cur)), 3000);
+            },
+          }, busy === 'all' ? t('common.clearing') : confirmAll ? t('settings.storageConfirm') : t('settings.storageAll')),
+        ]),
+        h('div', { key: 'desc', className: 'dvv-note' }, t('settings.storageDesc')),
+        loading ? h('div', { key: 'loading', className: 'dvv-note' }, t('common.loading')) : null,
+        error ? h('div', { key: 'err', className: 'dvv-note dvv-error' }, String(error)) : null,
+        ...rows,
+        h('div', { key: 'total', className: 'dvv-note' }, t('settings.storageTotal', { size: fmtBytes(total) })),
+      ].filter(Boolean));
+    }
+
+    function SettingsModal({ status, cookie, saving, note, onCookie, onSave, onClear, onClose, onRefresh, asr, asrSaving, asrNote, asrError, onAsrConfig, doc, onClearAnalysis, onClearChat, lang, onLang, asrModels, asrModelsError, modelDownloading, onDownloadModel, onCancelDownload, onRefreshAsr, asrPlan, installPlanError, installJob, onInstallComponent, onCancelInstall, storage, storageLoading, storageError, storageBusy, onRefreshStorage, onClearStorage, onPruneStorage }) {
       // 「清空本视频分析缓存」的二次确认只影响当前打开的视频。
       const [confirmCache, setConfirmCache] = useState(false);
       const model = status && status.model ? `${status.model.provider ?? '?'} · ${status.model.model ?? '?'}` : '未获取到（插件主机可能还没就绪）';
@@ -3336,9 +3476,13 @@ window.__ModuleLoader__.load({
             onDownloadModel, onCancelDownload,
             onCopied: () => {},
             plan: asrPlan, planError: installPlanError, installing: installJob,
-            onInstallAll: () => { if (onInstallComponent) onInstallComponent('all'); },
-            onInstall: (id) => { if (onInstallComponent) onInstallComponent(id); },
+            onInstallAll: (backend) => { if (onInstallComponent) onInstallComponent('all', backend); },
+            onInstall: (id, backend) => { if (onInstallComponent) onInstallComponent(id, backend); },
             onCancelInstall: () => { if (onCancelInstall) onCancelInstall(); },
+          }),
+          h(StorageSection, {
+            key: 'storage', storage, loading: storageLoading, error: storageError, busy: storageBusy,
+            onRefresh: onRefreshStorage, onClear: onClearStorage, onPrune: onPruneStorage,
           }),
         ]),
       ]));
@@ -3385,6 +3529,10 @@ window.__ModuleLoader__.load({
       const [asrModels, setAsrModels] = useState(null);
       const [asrModelsError, setAsrModelsError] = useState('');
       const [modelDl, setModelDl] = useState({ id: '', loading: false, phase: '', percent: null });
+      const [storage, setStorage] = useState(null);
+      const [storageError, setStorageError] = useState('');
+      const [storageLoading, setStorageLoading] = useState(false);
+      const [storageBusy, setStorageBusy] = useState('');
       const [setupDismissed, setSetupDismissed] = useState(() => readSetupDismissed());
       const [asrPlan, setAsrPlan] = useState(null);
       const [asrPlanError, setAsrPlanError] = useState('');
@@ -3607,6 +3755,57 @@ window.__ModuleLoader__.load({
 
       /* ---- 本机组件一键安装：GET /install/plan、POST /install（SSE） ---- */
 
+      const refreshStorage = useCallback(async () => {
+        setStorageLoading(true);
+        try {
+          const value = await call('storage');
+          if (!mounted.current) return;
+          setStorage(value || null);
+          setStorageError('');
+        } catch (caught) {
+          if (!mounted.current || (caught && caught.name === 'AbortError')) return;
+          setStorageError(String((caught && caught.message) || t('common.unknown')));
+        } finally {
+          if (mounted.current) setStorageLoading(false);
+        }
+      }, []);
+
+      const clearStorageCache = useCallback(async (kind) => {
+        setStorageBusy(String(kind || 'all'));
+        try {
+          const value = await call('storage/clear', null, { method: 'POST', body: { kind: String(kind || 'all') } });
+          if (!mounted.current) return;
+          if (value && value.status) setStorage(value.status);
+          setStorageError('');
+          showToast(t('settings.storagePruned', { n: Number(value?.removed || 0), size: fmtBytes(Number(value?.freedBytes || 0)) }));
+        } catch (caught) {
+          if (!mounted.current || (caught && caught.name === 'AbortError')) return;
+          setStorageError(String((caught && caught.message) || t('common.unknown')));
+        } finally {
+          if (mounted.current) setStorageBusy('');
+        }
+      }, []);
+
+      const pruneStorageCache = useCallback(async () => {
+        setStorageBusy('prune');
+        try {
+          const value = await call('storage/prune', null, { method: 'POST' });
+          if (!mounted.current) return;
+          if (value && value.status) setStorage(value.status);
+          const removed = Number(value?.removed || 0);
+          const freed = Number(value?.freedBytes || 0);
+          setStorageError('');
+          showToast(removed > 0
+            ? t('settings.storagePruned', { n: removed, size: fmtBytes(freed) })
+            : t('settings.storagePruneNone'));
+        } catch (caught) {
+          if (!mounted.current || (caught && caught.name === 'AbortError')) return;
+          setStorageError(String((caught && caught.message) || t('common.unknown')));
+        } finally {
+          if (mounted.current) setStorageBusy('');
+        }
+      }, []);
+
       const loadInstallPlan = useCallback(async () => {
         try {
           const value = await call('install/plan');
@@ -3624,7 +3823,7 @@ window.__ModuleLoader__.load({
         if (installAbort.current) { try { installAbort.current.abort(); } catch { /* ignore */ } }
       }, []);
 
-      const installComponents = useCallback((id) => {
+      const installComponents = useCallback((id, backend) => {
         const target = String(id || '');
         if (!target || installJobRef.current.loading) return;
         if (installAbort.current) { try { installAbort.current.abort(); } catch { /* ignore */ } }
@@ -3638,7 +3837,7 @@ window.__ModuleLoader__.load({
           let failure = null;
           const names = [];
           try {
-            await streamSSE('install', { id: target }, {
+            await streamSSE('install', { id: target, backend: String(backend || '') }, {
               signal: controller.signal,
               onEvent(event) {
                 if (!mounted.current) return 'stop';
@@ -4856,7 +5055,7 @@ window.__ModuleLoader__.load({
 
       /* ---------------------------------------------------------------- 渲染 */
 
-      const openSettings = () => { setOverlay('settings'); setCookieNote(''); setAsrNote(''); void refreshAsr(); void loadAsrModels(); void loadInstallPlan(); };
+      const openSettings = () => { setOverlay('settings'); setCookieNote(''); setAsrNote(''); void refreshAsr(); void loadAsrModels(); void loadInstallPlan(); void refreshStorage(); };
 
       /** 历史项点击：host 记录里 url 是原链接，优先用 url 重新解析。 */
       const openHistoryItem = (item) => {
@@ -5037,7 +5236,7 @@ window.__ModuleLoader__.load({
             ? h(SetupCard, {
                 key: 'setup', onOpen: openSettings,
                 onDismiss: () => { writeSetupDismissed(); setSetupDismissed(true); },
-                onInstallAll: () => installComponents('all'),
+                onInstallAll: (backend) => installComponents('all', backend),
                 onCancelInstall: cancelInstall,
                 installing: installJob,
               })
@@ -5163,12 +5362,16 @@ window.__ModuleLoader__.load({
           onCancelDownload: cancelModelDownload,
           onRefreshAsr: () => { void refreshAsr(true); void loadAsrModels(); void loadInstallPlan(); },
           asrPlan, installPlanError: asrPlanError, installJob,
-          onInstallComponent: (id) => installComponents(id),
+          onInstallComponent: (id, backend) => installComponents(id, backend),
           onCancelInstall: cancelInstall,
           onAsrConfig: (patch) => { void submitAsrConfig(patch); },
           doc, lang: langSetting, onLang: changeLang,
           onClearAnalysis: (video) => { void clearAnalysisCache(video); },
           onClearChat: (video) => { void clearChatCache(video); },
+          storage, storageLoading, storageError, storageBusy,
+          onRefreshStorage: () => { void refreshStorage(); },
+          onClearStorage: (kind) => { void clearStorageCache(kind); },
+          onPruneStorage: () => { void pruneStorageCache(); },
         }) : null,
         toast ? h('div', { key: 'toast', className: 'dvv-toast', role: 'status' }, toast) : null,
       ].filter(Boolean));
@@ -5573,6 +5776,8 @@ a.dvv-toolbar-title:hover{color:var(--dsw-alias-brand-primary)}
 .dvv-install-line{display:flex;align-items:center;gap:8px;margin:2px 0 6px}
 .dvv-install-line .dvv-progress{flex:1}
 .dvv-asr-spacer{flex:1}
+.dvv-storage-row{display:flex;align-items:center;gap:8px;padding:4px 0;border-top:1px dashed var(--dsw-alias-border-l1, rgba(0,0,0,.08))}
+.dvv-storage-row .dvv-note{flex:1 1 auto;text-align:right}
 .dvv-setup-close{flex:none;padding:2px 8px;font-size:14px;line-height:1.2}
 @media (max-width:979px){
   /* 单列：播放器 → 页签（含字幕提示条） → 追问对话框，整页滚动。

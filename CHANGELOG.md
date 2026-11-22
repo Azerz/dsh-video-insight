@@ -8,6 +8,16 @@
 - 字幕接口异常时不再笼统提示「没有字幕」，而是明确提示「字幕接口异常（…）可能是 Cookie 过期或被风控」；字幕列表有条目但拿不到下载地址时也会提示。
 - 新增 `test/bilibili.test.mjs` 回归测试（mock fetch：wbi 空列表 / wbi 报错 / 全部失败三种场景），CI 一并执行。
 
+## v0.12.4（2026-11-22）
+
+- **whisper 后端可选（Windows）**：一键安装 whisper.cpp 时不再固定下 CPU 版，可在「设置 → 本机组件 → whisper 后端」选择 自动 / CPU / NVIDIA CUDA 12.4 / CUDA 11.8（Windows arm64 另有 CUDA 13.5、OpenCL）。
+- **显卡自动检测**：`GET /install/plan` 会读取 Windows 显卡名称并给出推荐后端（NVIDIA → CUDA，其它 → CPU），面板显示「检测到显卡：… / 推荐后端：…」。
+- 安装接口 `POST /install` 支持 `backend` 参数；安装完成后把选择写进配置（`asr.whisperBackend`），设置里随时可改。
+- 说明：模型文件与后端无关，换后端只是换 whisper-cli 二进制；CUDA 版需要 NVIDIA 显卡与对应 CUDA 运行库。
+- **存储管理**：设置 → 存储管理，显示低清视频/分镜/转写/分析/大纲/翻译各类缓存的大小与文件数，支持逐类清理、全部清理、立即清理过期缓存；模型与组件单独列出（不自动清理）。
+- **自动清理**：插件启动后（及打开存储页时）最多每 6 小时按「最近使用」清理一次——低清视频沿用 LRU（最近 8 个 / 2 GiB / 30 天），分镜保留最近 60 个视频 / 90 天，转写、分析、大纲、翻译保留 90 天。
+- 新增 `GET /storage`、`POST /storage/clear`、`POST /storage/prune`；修复 CI 里 bilibili 测试实际上没被执行的问题（`run:` 缺 `|`）。
+
 ## Unreleased
 
 - 发布流程改为 GitHub Actions：推 `v*` tag 自动跑测试、`npm publish --provenance`（npm Trusted Publishing，OIDC，无需 token）并创建 GitHub Release。

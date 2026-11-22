@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg)](https://github.com/deepseek-ai)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#已知限制)
-[![Version](https://img.shields.io/badge/dsh--video--insight-v0.12.3-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/dsh--video--insight-v0.12.4-blue.svg)](package.json)
 
 ![dsh-video-insight](icon.svg)
 
@@ -160,8 +160,10 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | --- | --- | --- | --- |
 | ffmpeg / ffprobe | 抽帧、转 wav | `brew install ffmpeg` | `winget install Gyan.FFmpeg` |
 | yt-dlp | 下音频/低清视频 | `brew install yt-dlp` | `winget install yt-dlp.yt-dlp` |
-| whisper.cpp（`whisper-cli`） | Whisper 本地转写 | `brew install whisper.cpp` | 从 [whisper.cpp releases](https://github.com/ggml-org/whisper.cpp/releases) 下 `whisper-bin-x64.zip` 解压，把 `whisper-cli.exe` 路径填进设置 |
+| whisper.cpp（`whisper-cli`） | Whisper 本地转写 | `brew install whisper.cpp` | 从 [whisper.cpp releases](https://github.com/ggml-org/whisper.cpp/releases) 下对应构建（默认 CPU；NVIDIA 显卡可选 CUDA 版）解压，把 `whisper-cli.exe` 路径填进设置，或在设置里点「自动安装」 |
 | sherpa-onnx | SenseVoice 本地转写 | 从 [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases) 下 macOS 包解压到 `~/.dsh/video-tools/sherpa-onnx` | 同上，下 Windows 包解压到同一位置 |
+
+**Windows 上 whisper 选哪个构建？** 面板会自动读显卡型号并推荐：设置 → 本机组件 →「whisper 后端」可选 `自动（按显卡推荐）` / `CPU` / `NVIDIA CUDA 12.4` / `NVIDIA CUDA 11.8`（arm64 另有 CUDA 13.5、OpenCL）。模型文件与后端无关，换后端只是换 `whisper-cli` 二进制；CUDA 版需要 NVIDIA 显卡和对应 CUDA 运行库。判断当前用的是哪种：跑一次 `whisper-cli -m <模型> -f <wav>`，看开头 `load_backend: loaded CUDA backend` / `loaded CPU backend`。
 
 模型文件默认放在 `~/.dsh/video-models/`（Windows 是 `C:\Users\<你>\.dsh\video-models\`）：
 
@@ -183,11 +185,14 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 | GET | `/dsh-video/api/status` | `{ok,value:{version,model,bilibili:{cookie},platforms,transcriptLimitChars,asr:{enabled,ready,engine,activeEngine,engineLabel,downloadReady}}}` |
 | GET | `/dsh-video/api/resolve?url=&force=1` | 解析链接 → `VideoDoc`（失败也是 HTTP 200 + `{ok:false,code,error}`） |
 | GET | `/dsh-video/api/asr/status?fresh=1` | 本地转写组件/引擎/模型状态 + `ocr`（画面文字识别）+ `vision`（画面理解/视觉模型能力）+ `privacy` 文案 + `hints` |
-| POST | `/dsh-video/api/asr/config` | `{enabled?,engine?,threads?,maxSeconds?,keepAudio?,autoTranscribe?,crossCheck?,ocrFallback?,ocrIntervalSeconds?,ocrMaxFrames?,frameSampling?:cuts\|uniform,cutThreshold?,frameMode?:auto\|ocr\|vision,visionModel?,visionMaxFrames?,visionPack?:sheet\|frames,sheetCols?}` → 新状态 |
+| POST | `/dsh-video/api/asr/config` | `{enabled?,engine?,threads?,maxSeconds?,keepAudio?,autoTranscribe?,crossCheck?,ocrFallback?,ocrIntervalSeconds?,ocrMaxFrames?,frameSampling?:cuts\|uniform,cutThreshold?,frameMode?:auto\|ocr\|vision,visionModel?,visionMaxFrames?,visionPack?:sheet\|frames,sheetCols?,whisperBackend?:auto\|cpu\|cuda-12.4\|cuda-11.8\|cuda-13.5\|opencl}` → 新状态 |
 | GET | `/dsh-video/api/asr/models` | 本地模型（Whisper / SenseVoice）文件状态：每个文件的路径、期望/实际大小、是否存在 |
 | POST | `/dsh-video/api/asr/models` | SSE 下载模型：`{id:"whisper"\|"sensevoice"\|"all", force?}`，帧 `phase` / `progress{percent,received,total}` / `done` / `error{code}` |
-| GET | `/dsh-video/api/install/plan` | 本机组件（ffmpeg/ffprobe/yt-dlp/whisper-cli/sherpa-onnx）是否已装、安装方式与预计大小 |
-| POST | `/dsh-video/api/install` | SSE 一键安装组件：`{id:"ffmpeg"\|"ffprobe"\|"ytdlp"\|"whisper"\|"sherpa"\|"all"}`，帧 `phase` / `progress{component,stage,percent}` / `installed{component,path}` / `done` / `error{code}` |
+| GET | `/dsh-video/api/storage` | 本地缓存概览：各类目录的 `files`/`bytes`/保留策略 + 只读的模型/组件体积 + `lastPrunedAt` |
+| POST | `/dsh-video/api/storage/clear` | `{kind:\"assets\"\|\"storyboards\"\|\"transcripts\"\|\"analyses\"\|\"outlines\"\|\"translations\"\|\"all\"}` → 清空该目录并返回新概览 |
+| POST | `/dsh-video/api/storage/prune` | 立即执行一次过期清理（绕过 6 小时节流） |
+| GET | `/dsh-video/api/install/plan` | 本机组件（ffmpeg/ffprobe/yt-dlp/whisper-cli/sherpa-onnx）是否已装、安装方式与预计大小；含 `gpus`（Windows 检测到的显卡）、`suggested`（推荐 whisper 后端）与 whisper 的 `variants`/`backend`/`activeBackend` |
+| POST | `/dsh-video/api/install` | SSE 一键安装组件：`{id:"ffmpeg"\|"ffprobe"\|"ytdlp"\|"whisper"\|"sherpa"\|"all", backend?}`（`backend` 仅 whisper 用：`auto`\|`cpu`\|`cuda-12.4`\|`cuda-11.8`\|`cuda-13.5`\|`opencl`），帧 `phase` / `progress{component,stage,percent}` / `installed{component,path,backend?}` / `done` / `error{code}` |
 | POST | `/dsh-video/api/transcribe` | SSE：`{url?/docId?, force?}`，帧 `phase` / `progress{percent,stage}` / `done{docId,transcript,cached?}` / `error{code,message}`；无语音时自动兜底 OCR / 画面理解（stage 含 `vision`） |
 | POST | `/dsh-video/api/analyze` | SSE：`{mode:'summary'\|'ask', url?/docId?, question?, history?}`，帧 `phase` / `delta` / `done` / `error` |
 | POST | `/dsh-video/api/chapters` | `{url?/docId?}` → `{ok,value:{chapters:[{start,title,gist}],duration}}` |
@@ -276,6 +281,22 @@ host 半零外部依赖（只用 Node 内置 `fetch`/`crypto`），不写锁文�
 - **可在设置里覆盖**：设置 → 语言，三选一「跟随 DSH / 中文 / English」，切换立即生效（存在本地 `dsh-video.lang`）。
 - **AI 输出对应语言**：总结、追问、章节、思维导图、画面描述都按当前语言生成；中文 / 英文有完整模板与小节标题，其它语言按英文模板 + 目标语言指令输出。
 - **缓存按语言分开**：同一条视频的中文总结和英文总结各自缓存，切换语言不会看到上一门语言的旧内容。
+
+## 存储与清理
+
+所有缓存都在 `~/.dsh/` 下，面板「设置 → 存储管理」能看到每类的体积并可单独清理：
+
+| 目录 | 内容 | 自动清理 |
+| --- | --- | --- |
+| `video-assets/` | 低清视频、镜头切点、章节缩略图 | 最近 8 个视频 / 总量 2 GiB / 30 天未使用 |
+| `video-storyboards/` | 分镜拼图 | 最近 60 个视频 / 90 天 |
+| `video-transcripts/` | 本地转写 / OCR / 画面理解稿 | 90 天 |
+| `video-analyses/` | 总结 / 章节 / 导图 / 对话 | 90 天 |
+| `video-outlines/` | 章节画面描述 | 90 天 |
+| `video-translations/` | 双语翻译 | 90 天 |
+| `video-models/`、`video-tools/` | 模型与组件 | 不自动清理（重下代价高） |
+
+清理是惰性的：插件启动 5 秒后跑一次，之后最多每 6 小时一次；也可以点「立即清理过期缓存」。删除历史记录不会删磁盘缓存，想清空用存储管理。
 
 ## 已知限制
 
