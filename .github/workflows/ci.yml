@@ -23,5 +23,6 @@ jobs:
           node --check client/client.js
       - name: Client tests
         run: node test/client.test.mjs
+          node test/bilibili.test.mjs
       - name: Package dry-run
         run: npm pack --dry-run

@@ -2,6 +2,12 @@
 
 本项目的版本号与 `package.json` 保持一致；面板是单文件客户端，刷新页面即生效。
 
+## v0.12.3（2026-11-22）
+
+- 修复 B 站部分视频（尤其分 P + AI 字幕）取不到字幕、被降级成画面理解的问题：字幕接口改为三级回退（wbi 签名 `x/player/wbi/v2` → `x/player/v2?bvid&cid` → `x/player/v2?aid&cid`），wbi 返回空列表或非 0 时自动换接口重取。
+- 字幕接口异常时不再笼统提示「没有字幕」，而是明确提示「字幕接口异常（…）可能是 Cookie 过期或被风控」；字幕列表有条目但拿不到下载地址时也会提示。
+- 新增 `test/bilibili.test.mjs` 回归测试（mock fetch：wbi 空列表 / wbi 报错 / 全部失败三种场景），CI 一并执行。
+
 ## Unreleased
 
 - 发布流程改为 GitHub Actions：推 `v*` tag 自动跑测试、`npm publish --provenance`（npm Trusted Publishing，OIDC，无需 token）并创建 GitHub Release。
